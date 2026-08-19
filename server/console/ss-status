@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+echo "--- health ---"
+curl -sf http://localhost:8080/actuator/health || echo "(unreachable)"
+echo ""
+echo "--- jvm ---"
+java -version 2>&1
+echo ""
+echo "--- process uptime ---"
+if [ -r /proc/1/stat ]; then
+	started_ticks=$(awk '{print $22}' /proc/1/stat)
+	hz=$(getconf CLK_TCK 2>/dev/null || echo 100)
+	uptime_s=$(awk -v now="$(cut -d' ' -f1 /proc/uptime)" -v s="$started_ticks" -v hz="$hz" 'BEGIN { print now - (s / hz) }')
+	echo "PID 1 running for ~${uptime_s}s"
+fi

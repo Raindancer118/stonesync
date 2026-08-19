@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+cat <<'EOF'
+StoneSync server console — available commands:
+
+  help              show this list
+  ss-status         health check + JVM/uptime summary
+  ss-vaults         list vaults (id, name, owner)
+  ss-docs [vault]   list documents, optionally filtered by vault id
+  ss-updates        pending (unsnapshotted) Yjs update count per document
+  ss-attachments    attachment count + disk usage of /data/vault
+  ss-users          list users (id, email, created_at — no secrets)
+  ss-apikeys <user> list a user's API keys (id, name, revoked?)
+
+Container logs are not duplicated here on purpose — use Portainer's own
+"Logs" tab for that (streams `docker logs` directly, no extra tooling
+needed for it).
+EOF

@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/pg-env.sh
+
+echo "--- attachment metadata (DB) ---"
+psql -X -c "SELECT document_id, content_hash, size, modified_at FROM attachments ORDER BY modified_at DESC LIMIT 200;"
+echo ""
+echo "--- disk usage of /data/vault ---"
+du -sh /data/vault 2>/dev/null || echo "(empty or unreadable)"

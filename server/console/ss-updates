@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/pg-env.sh
+
+# Documents with a growing unsnapshotted update-log are the ones closest to
+# triggering compaction (see SnapshotService) - useful to eyeball if sync
+# ever looks stuck or if a document's log is growing unexpectedly.
+psql -X -c "
+  SELECT d.id AS document_id, d.current_path, count(u.id) AS pending_updates,
+         coalesce(sum(octet_length(u.update_bytes)), 0) AS pending_bytes
+  FROM documents d
+  LEFT JOIN yjs_updates u ON u.document_id = d.id
+  GROUP BY d.id, d.current_path
+  HAVING count(u.id) > 0
+  ORDER BY pending_updates DESC;
+"

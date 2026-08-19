@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/pg-env.sh
+# password_hash deliberately excluded, even though it's a bcrypt/argon hash
+# of an unused placeholder (auth is API-key-only) - no reason to print it.
+psql -X -c "SELECT id, email, created_at FROM users ORDER BY created_at;"

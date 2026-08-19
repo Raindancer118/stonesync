@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/pg-env.sh
+
+if [ "${1:-}" != "" ]; then
+	psql -X -c "SELECT id, current_path, content_type, deleted_at, updated_at FROM documents WHERE vault_id = '$1' ORDER BY updated_at DESC;"
+else
+	psql -X -c "SELECT id, vault_id, current_path, content_type, deleted_at, updated_at FROM documents ORDER BY updated_at DESC LIMIT 200;"
+fi

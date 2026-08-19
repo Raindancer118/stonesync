@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/pg-env.sh
+psql -X -c "SELECT id, name, owner_id, created_at FROM vaults ORDER BY created_at;"

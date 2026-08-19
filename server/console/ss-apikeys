@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/pg-env.sh
+
+if [ "${1:-}" = "" ]; then
+	echo "Usage: ss-apikeys <userId>" >&2
+	echo "(run ss-users first to find the user id)" >&2
+	exit 1
+fi
+
+# key_hash deliberately excluded - it's a SHA-256 hash usable directly for
+# lookup, so it's still sensitive even though it's not the raw key.
+psql -X -c "SELECT id, name, created_at, revoked_at FROM api_keys WHERE user_id = '$1' ORDER BY created_at;"
