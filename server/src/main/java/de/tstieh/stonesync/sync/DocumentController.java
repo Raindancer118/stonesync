@@ -3,6 +3,7 @@ package de.tstieh.stonesync.sync;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -17,7 +18,9 @@ import java.util.UUID;
 
 /**
  * Document metadata endpoints (rename, tombstone-delete) - deliberately separate from the
- * Yjs binary WebSocket channel, since neither operation touches document content.
+ * Yjs binary WebSocket channel, since neither operation touches document content. Every
+ * endpoint enforces vault-level authorization in {@link DocumentService} using the
+ * authenticated caller's userId.
  */
 @RestController
 @RequestMapping("/api/documents")
@@ -30,20 +33,24 @@ public class DocumentController {
     }
 
     @PostMapping("/resolve")
-    public ResolveResponse resolve(@RequestBody ResolveRequest request) {
-        UUID documentId = documentService.resolveOrCreate(request.vaultId(), request.path(), request.contentType());
+    public ResolveResponse resolve(@RequestBody ResolveRequest request, Authentication authentication) {
+        UUID userId = (UUID) authentication.getPrincipal();
+        UUID documentId = documentService.resolveOrCreate(userId, request.vaultId(), request.path(), request.contentType());
         return new ResolveResponse(documentId);
     }
 
     @PatchMapping("/{documentId}/path")
-    public ResponseEntity<Void> rename(@PathVariable UUID documentId, @RequestBody RenameRequest request) {
-        documentService.rename(documentId, request.newPath());
+    public ResponseEntity<Void> rename(@PathVariable UUID documentId, @RequestBody RenameRequest request,
+                                        Authentication authentication) {
+        UUID userId = (UUID) authentication.getPrincipal();
+        documentService.rename(userId, documentId, request.newPath());
         return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/{documentId}")
-    public ResponseEntity<Void> delete(@PathVariable UUID documentId) {
-        documentService.markDeleted(documentId);
+    public ResponseEntity<Void> delete(@PathVariable UUID documentId, Authentication authentication) {
+        UUID userId = (UUID) authentication.getPrincipal();
+        documentService.markDeleted(userId, documentId);
         return ResponseEntity.noContent().build();
     }
 

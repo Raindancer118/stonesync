@@ -31,7 +31,7 @@ export default class StoneSyncPlugin extends Plugin {
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		if (!this.settings.displayName) {
-			this.settings.displayName = `Nutzer-${Math.random().toString(36).slice(2, 6)}`;
+			this.settings.displayName = `User-${Math.random().toString(36).slice(2, 6)}`;
 			await this.saveData(this.settings);
 		}
 
@@ -70,7 +70,7 @@ export default class StoneSyncPlugin extends Plugin {
 			})
 		);
 
-		// initial binding, falls beim Plugin-Load bereits eine Markdown-Datei offen ist
+		// initial binding, in case a Markdown file is already open when the plugin loads
 		this.app.workspace.onLayoutReady(() => {
 			void this.syncManager?.onActiveLeafChange();
 		});
@@ -89,10 +89,10 @@ export default class StoneSyncPlugin extends Plugin {
 		this.syncManager?.reconfigure();
 	}
 
-	/** Synchronisiert einen einzelnen Anhang (z.B. aus einem Kontextmenü-Eintrag heraus aufrufbar). */
+	/** Synchronizes a single attachment (e.g. callable from a context menu entry). */
 	async syncAttachment(vaultRelativePath: string): Promise<void> {
 		if (!this.settings.serverUrl || !this.settings.apiKey || !this.settings.vaultId) {
-			throw new Error("StoneSync ist nicht vollständig konfiguriert.");
+			throw new Error("StoneSync is not fully configured.");
 		}
 		const sync = new AttachmentSync({
 			serverUrl: this.settings.serverUrl,

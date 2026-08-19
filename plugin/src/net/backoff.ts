@@ -1,25 +1,24 @@
 export interface ReconnectBackoffOptions {
-	/** Verzögerung vor dem ersten Reconnect-Versuch, in ms. */
+	/** Delay before the first reconnect attempt, in ms. */
 	baseDelayMs: number;
-	/** Obergrenze für die Verzögerung, in ms. */
+	/** Upper bound for the delay, in ms. */
 	maxDelayMs: number;
 	/**
-	 * Anteil zufälliger Streuung um den berechneten Delay (0..1).
-	 * 0.2 bedeutet +/-20% Jitter. Verhindert, dass viele Clients (z.B. nach
-	 * einem Server-Neustart) exakt synchron erneut verbinden ("Thundering Herd").
+	 * Fraction of random spread around the computed delay (0..1).
+	 * 0.2 means +/-20% jitter. Prevents many clients (e.g. after a server
+	 * restart) from reconnecting at exactly the same time ("thundering herd").
 	 */
 	jitterRatio?: number;
-	/** Zufallsquelle für Jitter, Rückgabewert in [0, 1). Default: Math.random. */
+	/** Source of randomness for jitter, return value in [0, 1). Default: Math.random. */
 	jitter?: () => number;
 }
 
 const DEFAULT_JITTER_RATIO = 0.2;
 
 /**
- * Exponentieller Backoff mit Jitter für die WebSocket-Reconnect-Logik.
- * Wichtig für Mobile, wo die Verbindung beim Hintergrund-Wechsel gekappt
- * wird und viele kurz aufeinanderfolgende Reconnect-Versuche vermieden
- * werden sollen.
+ * Exponential backoff with jitter for the WebSocket reconnect logic.
+ * Important for mobile, where the connection is cut when switching to the
+ * background and many closely-spaced reconnect attempts should be avoided.
  */
 export class ReconnectBackoff {
 	private readonly baseDelayMs: number;
@@ -30,10 +29,10 @@ export class ReconnectBackoff {
 
 	constructor(options: ReconnectBackoffOptions) {
 		if (options.baseDelayMs <= 0) {
-			throw new Error("baseDelayMs muss > 0 sein.");
+			throw new Error("baseDelayMs must be > 0.");
 		}
 		if (options.maxDelayMs < options.baseDelayMs) {
-			throw new Error("maxDelayMs muss >= baseDelayMs sein.");
+			throw new Error("maxDelayMs must be >= baseDelayMs.");
 		}
 
 		this.baseDelayMs = options.baseDelayMs;
@@ -42,12 +41,12 @@ export class ReconnectBackoff {
 		this.jitter = options.jitter ?? Math.random;
 	}
 
-	/** Anzahl der bisherigen (fehlgeschlagenen) Verbindungsversuche seit dem letzten reset(). */
+	/** Number of (failed) connection attempts so far since the last reset(). */
 	get attempt(): number {
 		return this.attemptCount;
 	}
 
-	/** Liefert die Verzögerung für den nächsten Reconnect-Versuch und zählt hoch. */
+	/** Returns the delay for the next reconnect attempt and increments the counter. */
 	nextDelayMs(): number {
 		this.attemptCount += 1;
 		const exponentialDelay = this.baseDelayMs * 2 ** (this.attemptCount - 1);
@@ -59,7 +58,7 @@ export class ReconnectBackoff {
 		return Math.min(Math.max(0, Math.round(jittered)), this.maxDelayMs);
 	}
 
-	/** Nach erfolgreichem Connect aufrufen, um wieder bei baseDelayMs zu starten. */
+	/** Call after a successful connect to restart at baseDelayMs. */
 	reset(): void {
 		this.attemptCount = 0;
 	}

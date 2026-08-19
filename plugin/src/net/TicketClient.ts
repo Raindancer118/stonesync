@@ -8,14 +8,14 @@ export class TicketRequestError extends Error {
 }
 
 /**
- * Holt ein kurzlebiges Einmal-Ticket für den WebSocket-Handshake.
+ * Fetches a short-lived one-time ticket for the WebSocket handshake.
  *
- * Obsidian kann beim WS-Handshake keine Custom-Header setzen, daher wird
- * der API-Key ausschließlich hier (im REST-Call) als Bearer-Token gesendet,
- * niemals über die WS-URL oder im Klartext in Proxy-Logs.
+ * Obsidian cannot set custom headers during the WS handshake, so the API key
+ * is sent exclusively here (in the REST call) as a bearer token, never via
+ * the WS URL or in plaintext in proxy logs.
  *
- * `requestUrl` (statt `fetch`) wird genutzt, weil es CORS umgeht und auf
- * Desktop wie Mobile gleichermaßen funktioniert.
+ * `requestUrl` (instead of `fetch`) is used because it bypasses CORS and
+ * works equally on desktop and mobile.
  */
 export async function requestTicket(serverUrl: string, apiKey: string): Promise<string> {
 	const base = serverUrl.trim().replace(/\/+$/, "");
@@ -31,7 +31,7 @@ export async function requestTicket(serverUrl: string, apiKey: string): Promise<
 
 	if (response.status < 200 || response.status >= 300) {
 		throw new TicketRequestError(
-			`Ticket-Anfrage fehlgeschlagen (HTTP ${response.status}).`,
+			`Ticket request failed (HTTP ${response.status}).`,
 			response.status
 		);
 	}
@@ -39,7 +39,7 @@ export async function requestTicket(serverUrl: string, apiKey: string): Promise<
 	const body = response.json as { ticket?: string } | undefined;
 	if (!body?.ticket) {
 		throw new TicketRequestError(
-			"Server-Antwort auf Ticket-Anfrage enthielt kein 'ticket'-Feld."
+			"Server response to ticket request did not contain a 'ticket' field."
 		);
 	}
 

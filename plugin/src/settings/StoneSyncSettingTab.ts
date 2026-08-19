@@ -13,13 +13,13 @@ export class StoneSyncSettingTab extends PluginSettingTab {
 		containerEl.createEl("h2", { text: "StoneSync" });
 		containerEl.createEl("p", {
 			text:
-				"Live-Multi-User-Sync für dieses Vault. Verbindet sich mit einem StoneSync-Server " +
-				"(Yjs-CRDT-Relay + Live-Cursor-Presence).",
+				"Live multi-user sync for this vault. Connects to a StoneSync server " +
+				"(Yjs CRDT relay + live cursor presence).",
 		});
 
 		new Setting(containerEl)
-			.setName("Server-URL")
-			.setDesc("z.B. https://stonesync.example.com (https/wss wird automatisch abgeleitet).")
+			.setName("Server URL")
+			.setDesc("e.g. https://stonesync.example.com (https/wss is derived automatically).")
 			.addText((text) =>
 				text
 					.setPlaceholder("https://stonesync.example.com")
@@ -31,8 +31,8 @@ export class StoneSyncSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("API-Key")
-			.setDesc("Wird nur für den Ticket-Handshake (POST /api/auth/ticket) als Bearer-Token gesendet.")
+			.setName("API key")
+			.setDesc("Only sent as a bearer token for the ticket handshake (POST /api/auth/ticket).")
 			.addText((text) => {
 				text
 					.setPlaceholder("sk-...")
@@ -45,11 +45,11 @@ export class StoneSyncSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName("Vault-ID")
-			.setDesc("UUID des Vaults auf dem Server, mit dem dieses lokale Obsidian-Vault synchronisiert wird.")
+			.setName("Vault ID")
+			.setDesc("UUID of the vault on the server that this local Obsidian vault is synchronized with.")
 			.addText((text) =>
 				text
-					.setPlaceholder("z.B. 3f6a2e9a-...")
+					.setPlaceholder("e.g. 3f6a2e9a-...")
 					.setValue(this.plugin.settings.vaultId)
 					.onChange(async (value) => {
 						this.plugin.settings.vaultId = value.trim();
@@ -58,11 +58,11 @@ export class StoneSyncSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Anzeigename")
-			.setDesc("Wird anderen Nutzern bei Live-Cursor-Presence als dein Name angezeigt.")
+			.setName("Display name")
+			.setDesc("Shown to other users as your name in live cursor presence.")
 			.addText((text) =>
 				text
-					.setPlaceholder("Nutzer-xxxx")
+					.setPlaceholder("User-xxxx")
 					.setValue(this.plugin.settings.displayName)
 					.onChange(async (value) => {
 						this.plugin.settings.displayName = value.trim();
@@ -71,8 +71,8 @@ export class StoneSyncSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Sync aktiv")
-			.setDesc("Schaltet die Live-Synchronisation global ein/aus.")
+			.setName("Sync enabled")
+			.setDesc("Globally turns live synchronization on/off.")
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.syncEnabled).onChange(async (value) => {
 					this.plugin.settings.syncEnabled = value;

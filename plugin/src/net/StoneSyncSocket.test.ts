@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
-import { StoneSyncSocket, WebSocketLike } from "./StoneSyncSocket";
+import { StoneSyncSocket, WebSocketLike, isAuthError } from "./StoneSyncSocket";
 import { decodeMessage, MessageType } from "../protocol/prefix";
 import { ReconnectBackoff } from "./backoff";
 
-/** Minimale, steuerbare Fake-Implementierung von WebSocketLike für Tests. */
+/** Minimal, controllable fake implementation of WebSocketLike for tests. */
 class FakeWebSocket implements WebSocketLike {
 	static instances: FakeWebSocket[] = [];
 	readyState = 0; // CONNECTING
@@ -167,7 +167,7 @@ describe("StoneSyncSocket", () => {
 		ws.simulateOpen();
 		ws.sent = [];
 
-		// Server sendet REQUEST_SNAPSHOT als reines Präfix-Byte ohne Payload.
+		// Server sends REQUEST_SNAPSHOT as a pure prefix byte with no payload.
 		ws.simulateMessage(new Uint8Array([0x02]));
 
 		expect(ws.sent).toHaveLength(1);
@@ -230,5 +230,77 @@ describe("StoneSyncSocket", () => {
 
 		expect(statusChanges).toContain("connecting");
 		expect(statusChanges).toContain("connected");
+	});
+
+	it("stops retrying and reports status 'unauthorized' when getTicket() fails with HTTP 401", async () => {
+		FakeWebSocket.instances = [];
+		const doc = new Y.Doc();
+		const awareness = new Awareness(doc);
+		const statusChanges: string[] = [];
+		const getTicket = vi.fn(async () => {
+			throw Object.assign(new Error("invalid api key"), { status: 401 });
+		});
+		const socket = new StoneSyncSocket({
+			wsBaseUrl: "wss://server.example.com",
+			documentId: "doc-123",
+			getTicket,
+			doc,
+			awareness,
+			backoff: new ReconnectBackoff({ baseDelayMs: 100, maxDelayMs: 1000, jitter: () => 0.5 }),
+			webSocketFactory: (url) => new FakeWebSocket(url),
+			onStatusChange: (s) => statusChanges.push(s),
+		});
+
+		await socket.connect();
+
+		expect(socket.getStatus()).toBe("unauthorized");
+		expect(getTicket).toHaveBeenCalledTimes(1);
+
+		// Must NOT schedule a reconnect - advancing time should not trigger a second attempt.
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(getTicket).toHaveBeenCalledTimes(1);
+		expect(FakeWebSocket.instances).toHaveLength(0);
+	});
+
+	it("keeps retrying with backoff on a non-auth ticket error (e.g. network failure)", async () => {
+		FakeWebSocket.instances = [];
+		const doc = new Y.Doc();
+		const awareness = new Awareness(doc);
+		let calls = 0;
+		const getTicket = vi.fn(async () => {
+			calls++;
+			if (calls === 1) throw new Error("network unreachable");
+			return "ticket-2";
+		});
+		const socket = new StoneSyncSocket({
+			wsBaseUrl: "wss://server.example.com",
+			documentId: "doc-123",
+			getTicket,
+			doc,
+			awareness,
+			backoff: new ReconnectBackoff({ baseDelayMs: 100, maxDelayMs: 1000, jitter: () => 0.5 }),
+			webSocketFactory: (url) => new FakeWebSocket(url),
+		});
+
+		await socket.connect();
+		expect(socket.getStatus()).not.toBe("unauthorized");
+
+		await vi.advanceTimersByTimeAsync(100);
+		expect(getTicket).toHaveBeenCalledTimes(2);
+		expect(FakeWebSocket.instances).toHaveLength(1);
+	});
+});
+
+describe("isAuthError", () => {
+	it("recognizes HTTP 401 and 403 as auth errors", () => {
+		expect(isAuthError({ status: 401 })).toBe(true);
+		expect(isAuthError({ status: 403 })).toBe(true);
+	});
+
+	it("does not treat other statuses or non-status errors as auth errors", () => {
+		expect(isAuthError({ status: 500 })).toBe(false);
+		expect(isAuthError(new Error("network failure"))).toBe(false);
+		expect(isAuthError(null)).toBe(false);
+		expect(isAuthError("plain string")).toBe(false);
 	});
 });

@@ -4,12 +4,16 @@ import { MessageType, encodeMessage, decodeMessage, StoneSyncProtocolError } fro
 import { ReconnectBackoff } from "./backoff";
 import { computeOfflineDiff, isEmptyUpdate } from "../sync/stateVectorSync";
 
-export type ConnectionStatus = "idle" | "connecting" | "connected" | "reconnecting" | "closed";
+/**
+ * "unauthorized" is terminal, like "closed", but distinguishes an invalid/revoked API key
+ * (nothing will fix itself by retrying) from a transient network drop (worth reconnecting).
+ */
+export type ConnectionStatus = "idle" | "connecting" | "connected" | "reconnecting" | "closed" | "unauthorized";
 
 /**
- * Minimale Teilmenge der WebSocket-API, die dieser Client benötigt.
- * Erlaubt es, in Tests eine In-Memory-Fake-Implementierung zu injizieren,
- * ohne echte Netzwerk-Sockets oder die Obsidian-Runtime zu benötigen.
+ * Minimal subset of the WebSocket API that this client needs.
+ * Allows injecting an in-memory fake implementation in tests, without
+ * needing real network sockets or the Obsidian runtime.
  */
 export interface WebSocketLike {
 	readyState: number;
@@ -25,31 +29,30 @@ export interface WebSocketLike {
 const WS_OPEN = 1;
 
 export interface StoneSyncSocketOptions {
-	/** z.B. "wss://stonesync.example.com" (kein trailing slash). */
+	/** e.g. "wss://stonesync.example.com" (no trailing slash). */
 	wsBaseUrl: string;
-	/** UUID des Dokuments, mit dem diese Verbindung synchronisiert. */
+	/** UUID of the document this connection synchronizes. */
 	documentId: string;
-	/** Holt (bzw. erneuert) das kurzlebige Einmal-Ticket für den Handshake. */
+	/** Fetches (or renews) the short-lived one-time ticket for the handshake. */
 	getTicket: () => Promise<string>;
 	doc: Y.Doc;
 	awareness: Awareness;
 	backoff?: ReconnectBackoff;
-	/** Standardmäßig `(url) => new WebSocket(url)`; für Tests injizierbar. */
+	/** Defaults to `(url) => new WebSocket(url)`; injectable for tests. */
 	webSocketFactory?: (url: string) => WebSocketLike;
 	onStatusChange?: (status: ConnectionStatus) => void;
-	/** Für Logging/Diagnose; wird nie geworfen. */
+	/** For logging/diagnostics; never thrown. */
 	onError?: (error: unknown) => void;
 }
 
 /**
- * Eigener WebSocket-Client für das StoneSync-Protokoll.
+ * Custom WebSocket client for the StoneSync protocol.
  *
- * Bewusst KEIN 1:1-Einsatz von `y-websocket`, da:
- *  - der Auth-Flow custom ist (Ticket-Handshake statt Header/Query-Token),
- *  - der Server "dumm" ist (reines Blob-Relay, kein Sync-Step-1/2-Protokoll),
- *  - Reconnect-Verhalten und Offline-Delta-Resync exakt auf das
- *    StoneSync-Serverprotokoll (Prefix-Byte, REQUEST_SNAPSHOT) zugeschnitten
- *    sein müssen.
+ * Deliberately NOT a 1:1 use of `y-websocket`, because:
+ *  - the auth flow is custom (ticket handshake instead of header/query token),
+ *  - the server is "dumb" (a pure blob relay, no sync-step-1/2 protocol),
+ *  - reconnect behavior and offline delta resync must be tailored exactly to
+ *    the StoneSync server protocol (prefix byte, REQUEST_SNAPSHOT).
  */
 export class StoneSyncSocket {
 	private ws: WebSocketLike | null = null;
@@ -58,10 +61,10 @@ export class StoneSyncSocket {
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private readonly backoff: ReconnectBackoff;
 	private readonly webSocketFactory: (url: string) => WebSocketLike;
-	/** Zustand des Docs unmittelbar vor dem letzten Verbindungsabbruch (für Delta-Resync). */
+	/** State of the doc immediately before the last connection loss (for delta resync). */
 	private preDisconnectStateVector: Uint8Array | null = null;
 	private readonly onDocUpdate = (update: Uint8Array, origin: unknown) => {
-		if (origin === this) return; // von uns selbst appliziertes Remote-Update, nicht zurücksenden
+		if (origin === this) return; // remote update we applied ourselves, don't send it back
 		this.sendFrame(MessageType.DocUpdate, update);
 	};
 	private readonly onAwarenessUpdate = (
@@ -88,14 +91,14 @@ export class StoneSyncSocket {
 		return this.status;
 	}
 
-	/** Baut die Verbindung auf (bzw. stößt den ersten Reconnect-Versuch an). */
+	/** Establishes the connection (or triggers the first reconnect attempt). */
 	async connect(): Promise<void> {
 		this.closedByUser = false;
 		if (this.status === "connecting" || this.status === "connected") return;
 		await this.attemptConnect();
 	}
 
-	/** Trennt die Verbindung endgültig; es wird nicht mehr automatisch reconnected. */
+	/** Disconnects permanently; no automatic reconnect will happen afterward. */
 	disconnect(): void {
 		this.closedByUser = true;
 		if (this.reconnectTimer) {
@@ -107,7 +110,7 @@ export class StoneSyncSocket {
 		this.setStatus("closed");
 	}
 
-	/** Löst alle Listener; danach ist diese Instanz nicht mehr verwendbar. */
+	/** Detaches all listeners; this instance is no longer usable afterward. */
 	destroy(): void {
 		this.disconnect();
 		this.options.doc.off("update", this.onDocUpdate);
@@ -122,6 +125,14 @@ export class StoneSyncSocket {
 			ticket = await this.options.getTicket();
 		} catch (error) {
 			this.options.onError?.(error);
+			if (isAuthError(error)) {
+				// Invalid/revoked API key: retrying won't help and would otherwise hammer the
+				// server forever with exponential backoff. Stop for good and let the caller
+				// (e.g. an Obsidian Notice) tell the user to fix their settings.
+				this.closedByUser = true;
+				this.setStatus("unauthorized");
+				return;
+			}
 			this.scheduleReconnect();
 			return;
 		}
@@ -175,11 +186,10 @@ export class StoneSyncSocket {
 	}
 
 	/**
-	 * Sendet nach (Re-)Connect nur das Delta seit dem letzten bekannten
-	 * Zustand ("Delta-Resync"), statt das komplette Dokument neu zu laden.
-	 * Bei einem allerersten Connect ist die Baseline der leere State-Vector,
-	 * wodurch der volle bisherige lokale Inhalt (falls vorhanden) einmalig
-	 * gesendet wird.
+	 * After a (re)connect, sends only the delta since the last known state
+	 * ("delta resync"), instead of reloading the entire document. On a very
+	 * first connect, the baseline is the empty state vector, so the full
+	 * existing local content (if any) is sent once.
 	 */
 	private performResync(): void {
 		const baseline = this.preDisconnectStateVector ?? Y.encodeStateVector(new Y.Doc());
@@ -189,7 +199,7 @@ export class StoneSyncSocket {
 			this.sendFrame(MessageType.DocUpdate, diff);
 		}
 
-		// eigenen Awareness-Zustand nach jedem (Re-)Connect erneut bekannt geben
+		// re-announce our own awareness state after every (re)connect
 		const localState = this.options.awareness.getLocalState();
 		if (localState !== null) {
 			const update = encodeAwarenessUpdate(this.options.awareness, [this.options.awareness.clientID]);
@@ -200,7 +210,7 @@ export class StoneSyncSocket {
 	private handleMessage(data: unknown): void {
 		const bytes = toUint8Array(data);
 		if (!bytes) {
-			this.options.onError?.(new Error("Unbekanntes WebSocket-Nachrichtenformat empfangen."));
+			this.options.onError?.(new Error("Received unknown WebSocket message format."));
 			return;
 		}
 
@@ -222,10 +232,10 @@ export class StoneSyncSocket {
 		} else if (decoded.type === MessageType.RequestSnapshot) {
 			this.replyWithSnapshot();
 		}
-		// SnapshotPayload wird vom Server nie an Clients zurückgesendet (nur Client->Server).
+		// SnapshotPayload is never sent back to clients by the server (client->server only).
 	}
 
-	/** Antwortet auf eine REQUEST_SNAPSHOT-Server-Message mit dem vollen Dokumentzustand. */
+	/** Replies to a REQUEST_SNAPSHOT server message with the full document state. */
 	private replyWithSnapshot(): void {
 		const snapshot = Y.encodeStateAsUpdate(this.options.doc);
 		this.sendFrame(MessageType.SnapshotPayload, snapshot);
@@ -241,6 +251,17 @@ export class StoneSyncSocket {
 		this.status = status;
 		this.options.onStatusChange?.(status);
 	}
+}
+
+/**
+ * Duck-types an auth failure out of whatever `getTicket()` throws, without this module having
+ * to depend on `TicketRequestError` from `TicketClient.ts` (which imports the Obsidian API and
+ * therefore isn't safely importable in a plain unit-test context).
+ */
+export function isAuthError(error: unknown): boolean {
+	if (typeof error !== "object" || error === null || !("status" in error)) return false;
+	const status = (error as { status?: unknown }).status;
+	return status === 401 || status === 403;
 }
 
 function toUint8Array(data: unknown): Uint8Array | null {

@@ -45,7 +45,7 @@ class AdminServiceTest {
     }
 
     @Test
-    @DisplayName("eine neu erzeugte API-Key wird gehasht gespeichert, der Klartext nur einmal zurueckgegeben")
+    @DisplayName("a newly created API key is stored hashed, the plaintext is returned only once")
     void createApiKeyStoresOnlyTheHash() {
         String rawKey = service.createApiKey(userId, "my-device");
 
@@ -57,7 +57,7 @@ class AdminServiceTest {
     }
 
     @Test
-    @DisplayName("Widerrufen einer API-Key setzt revoked_at")
+    @DisplayName("revoking an API key sets revoked_at")
     void revokeApiKeySetsRevokedAt() {
         ApiKeyEntity key = new ApiKeyEntity(UUID.randomUUID(), userId, "dev", "hash", Instant.now());
         when(apiKeyRepository.findById(key.getId())).thenReturn(Optional.of(key));
@@ -68,7 +68,7 @@ class AdminServiceTest {
     }
 
     @Test
-    @DisplayName("Zuweisen einer Vault-Rolle legt bei Erstzugriff einen neuen Access-Eintrag an")
+    @DisplayName("assigning a vault role creates a new access entry on first access")
     void grantAccessCreatesNewEntryOnFirstAssignment() {
         UUID vaultId = UUID.randomUUID();
         when(accessRepository.findByUserIdAndVaultId(userId, vaultId)).thenReturn(Optional.empty());

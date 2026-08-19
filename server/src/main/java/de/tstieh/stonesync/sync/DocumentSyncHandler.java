@@ -92,7 +92,13 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler {
         sessions.stream()
                 .filter(WebSocketSession::isOpen)
                 .findFirst()
-                .ifPresent(target -> sendSafely(target, new byte[]{SyncMessageType.REQUEST_SNAPSHOT}));
+                .ifPresent(target -> {
+                    // Record the watermark BEFORE asking a client to snapshot, so any DOC_UPDATE
+                    // appended concurrently while the client builds its reply is never deleted
+                    // by the subsequent compaction (see SnapshotService).
+                    updateLogService.currentMaxId(documentId).ifPresent(maxId -> snapshotService.markPendingSnapshot(documentId, maxId));
+                    sendSafely(target, new byte[]{SyncMessageType.REQUEST_SNAPSHOT});
+                });
     }
 
     private void sendSafely(WebSocketSession session, byte[] raw) {

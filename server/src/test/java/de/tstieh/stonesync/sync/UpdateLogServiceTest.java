@@ -34,7 +34,7 @@ class UpdateLogServiceTest {
     }
 
     @Test
-    @DisplayName("ein Dokument-Update wird als neue Zeile im Append-Log gespeichert")
+    @DisplayName("a document update is stored as a new row in the append log")
     void appendPersistsUpdate() {
         byte[] payload = {1, 2, 3};
 
@@ -44,7 +44,7 @@ class UpdateLogServiceTest {
     }
 
     @Test
-    @DisplayName("die Update-Zaehlung bleibt unter dem Schwellwert, solange das Log klein ist")
+    @DisplayName("the update count stays below the threshold as long as the log is small")
     void thresholdNotExceededWhenLogSmall() {
         when(repository.countByDocumentId(documentId)).thenReturn(5L);
         when(repository.findByDocumentIdOrderByIdAsc(documentId))
@@ -54,7 +54,7 @@ class UpdateLogServiceTest {
     }
 
     @Test
-    @DisplayName("ueberschreitet die Anzahl der Log-Eintraege den Schwellwert, wird ein Snapshot faellig")
+    @DisplayName("when the number of log entries exceeds the threshold, a snapshot becomes due")
     void thresholdExceededByCount() {
         when(repository.countByDocumentId(documentId)).thenReturn(201L);
 
@@ -62,7 +62,7 @@ class UpdateLogServiceTest {
     }
 
     @Test
-    @DisplayName("ueberschreitet die Gesamtgroesse des Logs den Schwellwert, wird ein Snapshot faellig")
+    @DisplayName("when the total size of the log exceeds the threshold, a snapshot becomes due")
     void thresholdExceededBySize() {
         when(repository.countByDocumentId(documentId)).thenReturn(3L);
         byte[] big = new byte[600_000];

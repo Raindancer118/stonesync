@@ -4,6 +4,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Clock;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -35,6 +36,14 @@ public class UpdateLogService {
         }
         long totalBytes = totalSize(documentId);
         return totalBytes > properties.snapshotThresholdBytes();
+    }
+
+    /**
+     * The highest log entry id currently persisted for a document, i.e. a safe upper bound for
+     * what a snapshot compaction is allowed to delete (see {@link SnapshotService}).
+     */
+    public Optional<Long> currentMaxId(UUID documentId) {
+        return repository.findTopByDocumentIdOrderByIdDesc(documentId).map(YjsUpdateEntity::getId);
     }
 
     private long totalSize(UUID documentId) {

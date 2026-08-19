@@ -1,15 +1,15 @@
 import { requestUrl } from "obsidian";
 
 /**
- * Löst die Server-seitige Dokument-UUID (`documents.id`) für einen
- * Vault-relativen Pfad auf. Pfade sind laut Datenmodell niemals Primary
- * Key (`current_path` ist nur Metadatenfeld) — Renames auf Client-Seite
- * ändern nicht die documentId, weshalb hier lokal gecacht wird.
+ * Resolves the server-side document UUID (`documents.id`) for a
+ * vault-relative path. According to the data model, paths are never the
+ * primary key (`current_path` is only a metadata field) — renames on the
+ * client side do not change the documentId, which is why caching happens
+ * locally here.
  *
- * Server-Endpoint: `POST /api/documents/resolve` (`DocumentController#resolve`)
- * — liefert für ein bekanntes (vaultId, path) die bestehende UUID zurück,
- * legt bei unbekanntem Pfad ein neues `documents`-Row an und liefert dessen
- * frische UUID.
+ * Server endpoint: `POST /api/documents/resolve` (`DocumentController#resolve`)
+ * — for a known (vaultId, path) returns the existing UUID; for an unknown
+ * path creates a new `documents` row and returns its fresh UUID.
  */
 export type DocumentContentType = "TEXT" | "ATTACHMENT";
 
@@ -39,19 +39,19 @@ export class DocumentIdResolver {
 		});
 
 		if (response.status < 200 || response.status >= 300) {
-			throw new Error(`Dokument-Auflösung fehlgeschlagen (HTTP ${response.status}) für "${vaultRelativePath}".`);
+			throw new Error(`Document resolution failed (HTTP ${response.status}) for "${vaultRelativePath}".`);
 		}
 
 		const body = response.json as { documentId?: string } | undefined;
 		if (!body?.documentId) {
-			throw new Error(`Server-Antwort enthielt keine documentId für "${vaultRelativePath}".`);
+			throw new Error(`Server response did not contain a documentId for "${vaultRelativePath}".`);
 		}
 
 		this.cache.set(vaultRelativePath, body.documentId);
 		return body.documentId;
 	}
 
-	/** Bei Rename auf Client-Seite: Cache-Key mitziehen, damit kein neuer Resolve-Call nötig ist. */
+	/** On client-side rename: move the cache key along, so no new resolve call is needed. */
 	rename(oldPath: string, newPath: string): void {
 		const id = this.cache.get(oldPath);
 		if (id) {

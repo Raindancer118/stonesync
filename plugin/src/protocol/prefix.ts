@@ -1,14 +1,13 @@
 /**
- * StoneSync Wire-Protokoll: jedem binären Yjs-Frame wird ein Präfix-Byte
- * vorangestellt, damit der (CRDT-unwissende) Server-Relay zwischen
- * Dokument-Updates und Awareness/Presence-Updates unterscheiden kann,
- * ohne den Payload selbst zu interpretieren. Muss exakt
- * `SyncMessageType.java` auf dem Server entsprechen.
+ * StoneSync wire protocol: every binary Yjs frame is prefixed with a prefix
+ * byte, so that the (CRDT-unaware) server relay can distinguish between
+ * document updates and awareness/presence updates without interpreting the
+ * payload itself. Must exactly match `SyncMessageType.java` on the server.
  *
- * 0x00 = Dokument-Update    (Y.encodeStateAsUpdate-Diff, wird persistiert)
- * 0x01 = Awareness-Update   (encodeAwarenessUpdate, nur live geroutet)
- * 0x02 = REQUEST_SNAPSHOT   (nur Server->Client, kein Payload)
- * 0x03 = SNAPSHOT_PAYLOAD   (nur Client->Server, Antwort auf REQUEST_SNAPSHOT)
+ * 0x00 = document update    (Y.encodeStateAsUpdate diff, persisted)
+ * 0x01 = awareness update   (encodeAwarenessUpdate, routed live only)
+ * 0x02 = REQUEST_SNAPSHOT   (server->client only, no payload)
+ * 0x03 = SNAPSHOT_PAYLOAD   (client->server only, response to REQUEST_SNAPSHOT)
  */
 export enum MessageType {
 	DocUpdate = 0x00,
@@ -38,7 +37,7 @@ function isKnownMessageType(value: number): value is MessageType {
 	);
 }
 
-/** Baut ein Wire-Frame: [Präfix-Byte][Payload-Bytes]. Kopiert den Payload. */
+/** Builds a wire frame: [prefix byte][payload bytes]. Copies the payload. */
 export function encodeMessage(type: MessageType, payload: Uint8Array): Uint8Array {
 	const frame = new Uint8Array(payload.length + 1);
 	frame[0] = type;
@@ -46,18 +45,18 @@ export function encodeMessage(type: MessageType, payload: Uint8Array): Uint8Arra
 	return frame;
 }
 
-/** Liest ein Wire-Frame und trennt Präfix-Byte von Payload. */
+/** Reads a wire frame and separates the prefix byte from the payload. */
 export function decodeMessage(frame: Uint8Array): DecodedMessage {
 	if (frame.length < 1) {
 		throw new StoneSyncProtocolError(
-			"Leeres Frame kann nicht dekodiert werden (kein Präfix-Byte vorhanden)."
+			"Cannot decode empty frame (no prefix byte present)."
 		);
 	}
 
 	const prefix = frame[0];
 	if (!isKnownMessageType(prefix)) {
 		throw new StoneSyncProtocolError(
-			`Unbekanntes Präfix-Byte 0x${prefix.toString(16).padStart(2, "0")}.`
+			`Unknown prefix byte 0x${prefix.toString(16).padStart(2, "0")}.`
 		);
 	}
 

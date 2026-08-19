@@ -28,6 +28,11 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers("/ws/**").permitAll() // authenticated via handshake ticket instead
+                        // Container-internal forward target for thrown exceptions. Without this,
+                        // every error response (even correctly @ResponseStatus-annotated ones
+                        // like DocumentNotFoundException) gets masked as an opaque 403, because
+                        // the SecurityContext isn't preserved across the /error dispatch.
+                        .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(new ApiKeyAuthFilter(apiKeyRepository, apiKeyHasher),
                         UsernamePasswordAuthenticationFilter.class);

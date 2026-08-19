@@ -1,17 +1,16 @@
 export interface StoneSyncSettings {
-	/** Basis-URL des StoneSync-Servers, z.B. "https://stonesync.example.com". */
+	/** Base URL of the StoneSync server, e.g. "https://stonesync.example.com". */
 	serverUrl: string;
-	/** API-Key des Nutzers, wird nur für den Ticket-Handshake genutzt (nie über WS gesendet). */
+	/** API key of the user, only used for the ticket handshake (never sent over WS). */
 	apiKey: string;
-	/** UUID des Vaults auf dem Server, mit dem synchronisiert werden soll. */
+	/** UUID of the vault on the server to synchronize with. */
 	vaultId: string;
-	/** Globaler Ein/Aus-Schalter für die Synchronisation. */
+	/** Global on/off switch for synchronization. */
 	syncEnabled: boolean;
 	/**
-	 * Anzeigename für Live-Cursor-Presence. Wird beim ersten Start zufällig
-	 * generiert und danach stabil in den Plugin-Daten persistiert (statt bei
-	 * jedem Neustart neu gewürfelt zu werden), ist aber über die Settings-UI
-	 * änderbar.
+	 * Display name for live cursor presence. Generated randomly on first
+	 * start and then persisted stably in the plugin data (instead of being
+	 * re-rolled on every restart), but changeable via the settings UI.
 	 */
 	displayName: string;
 }
@@ -24,7 +23,7 @@ export const DEFAULT_SETTINGS: StoneSyncSettings = {
 	displayName: "",
 };
 
-/** Leitet aus der (https/http) Server-URL die passende WebSocket-Basis-URL ab. */
+/** Derives the matching WebSocket base URL from the (https/http) server URL. */
 export function toWebSocketBaseUrl(serverUrl: string): string {
 	const trimmed = serverUrl.trim().replace(/\/+$/, "");
 	if (trimmed.startsWith("https://")) {
@@ -36,7 +35,7 @@ export function toWebSocketBaseUrl(serverUrl: string): string {
 	if (trimmed.startsWith("wss://") || trimmed.startsWith("ws://")) {
 		return trimmed;
 	}
-	// keine Angabe eines Schemas: https/wss als sicheren Default annehmen
+	// no scheme given: assume https/wss as a safe default
 	return "wss://" + trimmed;
 }
 

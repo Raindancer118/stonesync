@@ -2,6 +2,7 @@ package de.tstieh.stonesync.attachments;
 
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -32,8 +33,10 @@ public class AttachmentController {
     public ResponseEntity<Void> upload(@RequestParam UUID documentId,
                                         @RequestParam String hash,
                                         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant modifiedAt,
-                                        @RequestParam MultipartFile file) throws IOException {
-        attachmentService.upload(documentId, hash, file.getBytes(), modifiedAt);
+                                        @RequestParam MultipartFile file,
+                                        Authentication authentication) throws IOException {
+        UUID userId = (UUID) authentication.getPrincipal();
+        attachmentService.upload(userId, documentId, hash, file.getBytes(), modifiedAt);
         return ResponseEntity.ok().build();
     }
 

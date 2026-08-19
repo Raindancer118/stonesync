@@ -25,7 +25,7 @@ class BootstrapServiceTest {
     private AdminService adminService;
 
     @Test
-    @DisplayName("Bootstrap deaktiviert (kein adminEmail konfiguriert) legt nichts an")
+    @DisplayName("bootstrap disabled (no adminEmail configured) creates nothing")
     void doesNothingWhenDisabled() {
         BootstrapProperties properties = new BootstrapProperties("", "Default Vault", "bootstrap");
         BootstrapService service = new BootstrapService(userRepository, adminService, properties);
@@ -37,7 +37,7 @@ class BootstrapServiceTest {
     }
 
     @Test
-    @DisplayName("Bootstrap ueberspringt, wenn bereits mindestens ein Nutzer existiert")
+    @DisplayName("bootstrap skips when at least one user already exists")
     void skipsWhenUsersAlreadyExist() {
         BootstrapProperties properties = new BootstrapProperties("admin@example.com", "Default Vault", "bootstrap");
         when(userRepository.count()).thenReturn(1L);
@@ -50,7 +50,7 @@ class BootstrapServiceTest {
     }
 
     @Test
-    @DisplayName("Bootstrap legt bei leerer User-Tabelle Admin-User, Vault, Owner-Zugriff und API-Key an")
+    @DisplayName("bootstrap creates admin user, vault, owner access and API key when the user table is empty")
     void createsAdminUserVaultAndApiKeyWhenEmpty() {
         BootstrapProperties properties = new BootstrapProperties("admin@example.com", "Default Vault", "bootstrap");
         when(userRepository.count()).thenReturn(0L);

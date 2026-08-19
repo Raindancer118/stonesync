@@ -62,7 +62,7 @@ class DocumentSyncHandlerTest {
     }
 
     @Test
-    @DisplayName("0x00 Dokument-Update wird persistiert und an alle anderen Clients desselben Dokuments verteilt")
+    @DisplayName("0x00 document update is persisted and broadcast to all other clients of the same document")
     void docUpdateIsPersistedAndBroadcastToOthers() throws Exception {
         doReturn(java.util.Set.of(sender, otherClient)).when(registry).sessionsFor(documentId);
         when(updateLogService.exceedsSnapshotThreshold(documentId)).thenReturn(false);
@@ -79,7 +79,7 @@ class DocumentSyncHandlerTest {
     }
 
     @Test
-    @DisplayName("0x01 Awareness-Update wird NICHT persistiert, nur an andere Clients weitergeroutet")
+    @DisplayName("0x01 awareness update is NOT persisted, only routed on to other clients")
     void awarenessIsRoutedButNeverPersisted() throws Exception {
         doReturn(java.util.Set.of(sender, otherClient)).when(registry).sessionsFor(documentId);
 
@@ -91,7 +91,7 @@ class DocumentSyncHandlerTest {
     }
 
     @Test
-    @DisplayName("0x03 Snapshot-Payload vom Client ersetzt das Update-Log ueber den SnapshotService")
+    @DisplayName("0x03 snapshot payload from the client replaces the update log via the SnapshotService")
     void snapshotPayloadReplacesLog() throws Exception {
         byte[] snapshotBytes = {7, 8, 9};
         handler.handleMessage(sender, new BinaryMessage(messageOf(0x03, snapshotBytes)));
@@ -100,10 +100,11 @@ class DocumentSyncHandlerTest {
     }
 
     @Test
-    @DisplayName("wird der Schwellwert nach einem Update ueberschritten, erhaelt ein aktiver Client REQUEST_SNAPSHOT")
+    @DisplayName("when the threshold is exceeded after an update, an active client receives REQUEST_SNAPSHOT")
     void requestsSnapshotWhenThresholdExceeded() throws Exception {
         doReturn(java.util.Set.of(sender, otherClient)).when(registry).sessionsFor(documentId);
         when(updateLogService.exceedsSnapshotThreshold(documentId)).thenReturn(true);
+        when(updateLogService.currentMaxId(documentId)).thenReturn(java.util.Optional.of(42L));
 
         handler.handleMessage(sender, new BinaryMessage(messageOf(0x00, (byte) 1)));
 
@@ -116,5 +117,17 @@ class DocumentSyncHandlerTest {
                         senderCaptor.getAllValues().stream(), otherCaptor.getAllValues().stream())
                 .anyMatch(m -> m.getPayload().get(0) == 0x02);
         assertThat(sawRequestSnapshot).isTrue();
+    }
+
+    @Test
+    @DisplayName("before sending REQUEST_SNAPSHOT, the current log watermark is marked (prevents data loss on concurrent updates)")
+    void marksSnapshotWatermarkBeforeRequestingSnapshot() throws Exception {
+        doReturn(java.util.Set.of(sender)).when(registry).sessionsFor(documentId);
+        when(updateLogService.exceedsSnapshotThreshold(documentId)).thenReturn(true);
+        when(updateLogService.currentMaxId(documentId)).thenReturn(java.util.Optional.of(99L));
+
+        handler.handleMessage(sender, new BinaryMessage(messageOf(0x00, (byte) 1)));
+
+        verify(snapshotService).markPendingSnapshot(documentId, 99L);
     }
 }

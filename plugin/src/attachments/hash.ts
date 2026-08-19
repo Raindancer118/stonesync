@@ -1,9 +1,10 @@
 /**
- * SHA-256-Hashing ausschließlich über die Web Crypto API (`crypto.subtle`).
+ * SHA-256 hashing exclusively via the Web Crypto API (`crypto.subtle`).
  *
- * Bewusst KEIN `node:crypto` — das Plugin muss auf Obsidian Mobile (iOS/Android)
- * laufen, wo Node-Module nicht verfügbar sind. `crypto.subtle` ist sowohl im
- * Obsidian-Desktop-Renderer (Chromium) als auch in der Mobile-WebView vorhanden.
+ * Deliberately NOT `node:crypto` — the plugin must run on Obsidian Mobile
+ * (iOS/Android), where Node modules are not available. `crypto.subtle` is
+ * present both in the Obsidian desktop renderer (Chromium) and in the mobile
+ * WebView.
  */
 export async function sha256Hex(data: ArrayBuffer): Promise<string> {
 	const digest = await crypto.subtle.digest("SHA-256", data);

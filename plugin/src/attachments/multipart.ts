@@ -1,19 +1,19 @@
 export interface MultipartFields {
-	/** Server-seitige Dokument-UUID (aufgelöst über DocumentIdResolver), nicht Pfad/VaultId. */
+	/** Server-side document UUID (resolved via DocumentIdResolver), not path/vaultId. */
 	documentId: string;
 	hash: string;
-	/** ISO-8601-Instant, muss zu Spring's `@DateTimeFormat(iso = DATE_TIME)` passen. */
+	/** ISO-8601 instant, must match Spring's `@DateTimeFormat(iso = DATE_TIME)`. */
 	modifiedAt: string;
 	fileName: string;
 	data: ArrayBuffer;
 }
 
 /**
- * Baut einen minimalen multipart/form-data-Body ohne externe Abhängigkeiten
- * (kein `form-data`-npm-Paket, das auf Node-Streams/Buffer setzt und damit
- * auf Obsidian Mobile nicht liefe). Reine Logik, unabhängig von der
- * Obsidian-Runtime -> isoliert unit-testbar. Feldnamen müssen exakt den
- * `@RequestParam`-Namen von `AttachmentController#upload` entsprechen.
+ * Builds a minimal multipart/form-data body without external dependencies
+ * (no `form-data` npm package, which relies on Node streams/Buffer and thus
+ * would not run on Obsidian Mobile). Pure logic, independent of the Obsidian
+ * runtime -> unit-testable in isolation. Field names must exactly match the
+ * `@RequestParam` names of `AttachmentController#upload`.
  */
 export function buildMultipartBody(boundary: string, fields: MultipartFields): ArrayBuffer {
 	const encoder = new TextEncoder();

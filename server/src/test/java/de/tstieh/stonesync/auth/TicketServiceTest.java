@@ -18,11 +18,11 @@ class TicketServiceTest {
     private final UUID userId = UUID.randomUUID();
 
     @Nested
-    @DisplayName("Ticket-Erzeugung und Ablauf")
+    @DisplayName("ticket creation and expiry")
     class Lifecycle {
 
         @Test
-        @DisplayName("erzeugtes Ticket ist unmittelbar gueltig und liefert die User-Id")
+        @DisplayName("an issued ticket is immediately valid and returns the user id")
         void issuedTicketIsValidImmediately() {
             MutableClock clock = MutableClock.at(Instant.parse("2026-01-01T00:00:00Z"));
             TicketService service = new TicketService(new TicketProperties(15), clock);
@@ -34,7 +34,7 @@ class TicketServiceTest {
         }
 
         @Test
-        @DisplayName("Ticket laeuft nach der konfigurierten TTL ab")
+        @DisplayName("a ticket expires after the configured TTL")
         void ticketExpiresAfterTtl() {
             MutableClock clock = MutableClock.at(Instant.parse("2026-01-01T00:00:00Z"));
             TicketService service = new TicketService(new TicketProperties(15), clock);
@@ -46,7 +46,7 @@ class TicketServiceTest {
         }
 
         @Test
-        @DisplayName("Ticket ist innerhalb der TTL bis kurz vor Ablauf gueltig")
+        @DisplayName("a ticket is valid within the TTL right up until just before expiry")
         void ticketStillValidJustBeforeExpiry() {
             MutableClock clock = MutableClock.at(Instant.parse("2026-01-01T00:00:00Z"));
             TicketService service = new TicketService(new TicketProperties(15), clock);
@@ -59,11 +59,11 @@ class TicketServiceTest {
     }
 
     @Nested
-    @DisplayName("Einmal-Verbrauch")
+    @DisplayName("single use")
     class SingleUse {
 
         @Test
-        @DisplayName("ein bereits verbrauchtes Ticket ist beim zweiten Versuch ungueltig")
+        @DisplayName("an already consumed ticket is invalid on the second attempt")
         void ticketCannotBeUsedTwice() {
             MutableClock clock = MutableClock.at(Instant.parse("2026-01-01T00:00:00Z"));
             TicketService service = new TicketService(new TicketProperties(15), clock);
@@ -76,11 +76,11 @@ class TicketServiceTest {
     }
 
     @Nested
-    @DisplayName("Unbekannte Tickets")
+    @DisplayName("unknown tickets")
     class Unknown {
 
         @Test
-        @DisplayName("ein nie ausgestelltes Ticket ist ungueltig")
+        @DisplayName("a ticket that was never issued is invalid")
         void unknownTicketIsInvalid() {
             TicketService service = new TicketService(new TicketProperties(15),
                     Clock.fixed(Instant.now(), ZoneOffset.UTC));

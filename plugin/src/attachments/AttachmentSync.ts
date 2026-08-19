@@ -8,7 +8,7 @@ export interface AttachmentSyncOptions {
 	apiKey: string;
 	vaultId: string;
 	adapter: DataAdapter;
-	/** Injizierbar für Tests; produktiv wird intern ein eigener Resolver erzeugt. */
+	/** Injectable for tests; in production an internal resolver is created automatically. */
 	documentIdResolver?: DocumentIdResolver;
 }
 
@@ -18,12 +18,12 @@ export interface AttachmentUploadResult {
 }
 
 /**
- * Anhang-Synchronisation, getrennt vom Yjs/CRDT-Kanal (kein CRDT für
- * Binärdateien). Ablauf: SHA-256-Hash lokal berechnen, Server fragen ob der
- * Hash bereits bekannt ist, nur bei unbekanntem Hash tatsächlich hochladen.
+ * Attachment synchronization, separate from the Yjs/CRDT channel (no CRDT for
+ * binary files). Flow: compute the SHA-256 hash locally, ask the server whether
+ * the hash is already known, and only actually upload when the hash is unknown.
  *
- * Ausschließlich `app.vault.adapter` für Dateizugriff (kein Node `fs`/`path`),
- * damit das Plugin auch auf Obsidian Mobile funktioniert.
+ * Uses exclusively `app.vault.adapter` for file access (no Node `fs`/`path`),
+ * so the plugin also works on Obsidian Mobile.
  */
 export class AttachmentSync {
 	private readonly documentIdResolver: DocumentIdResolver;
@@ -33,7 +33,7 @@ export class AttachmentSync {
 			options.documentIdResolver ?? new DocumentIdResolver(options.serverUrl, options.apiKey, options.vaultId);
 	}
 
-	/** Prüft den Hash gegen den Server und lädt die Datei nur bei Bedarf hoch. */
+	/** Checks the hash against the server and uploads the file only if needed. */
 	async syncFile(vaultRelativePath: string): Promise<AttachmentUploadResult> {
 		const data = await this.options.adapter.readBinary(vaultRelativePath);
 		const hash = await sha256Hex(data);
@@ -61,7 +61,7 @@ export class AttachmentSync {
 
 		if (response.status === 404) return false;
 		if (response.status < 200 || response.status >= 300) {
-			throw new Error(`Attachment-Status-Check fehlgeschlagen (HTTP ${response.status}).`);
+			throw new Error(`Attachment status check failed (HTTP ${response.status}).`);
 		}
 
 		const body = response.json as { known?: boolean } | undefined;
@@ -93,7 +93,7 @@ export class AttachmentSync {
 		});
 
 		if (response.status < 200 || response.status >= 300) {
-			throw new Error(`Attachment-Upload fehlgeschlagen (HTTP ${response.status}).`);
+			throw new Error(`Attachment upload failed (HTTP ${response.status}).`);
 		}
 	}
 }

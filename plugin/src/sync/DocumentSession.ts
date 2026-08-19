@@ -15,19 +15,17 @@ export interface DocumentSessionOptions {
 }
 
 /**
- * Eine Sync-Session pro Textdatei: ein eigenes Y.Doc (mit einem
- * "content"-Y.Text) + eine eigene Awareness-Instanz + eine eigene
- * WebSocket-Verbindung (der Server-Handshake ist pro Dokument, siehe
- * `wss://.../ws?ticket=...&documentId=<UUID>`).
+ * One sync session per text file: its own Y.Doc (with a "content" Y.Text)
+ * + its own awareness instance + its own WebSocket connection (the server
+ * handshake is per document, see `wss://.../ws?ticket=...&documentId=<UUID>`).
  *
- * Design-Entscheidung (statt einem einzigen geteilten Y.Doc mit einem
- * Y.Text pro Datei fürs ganze Vault): das Wire-Protokoll bindet die
- * Verbindung explizit an genau eine `documentId`, und Live-Cursor-Presence
- * ist ohnehin nur unter den Nutzern relevant, die dieselbe Datei geöffnet
- * haben. Ein Y.Doc pro Datei hält die Blast-Radius klein (ein Parse-/
- * Encoding-Fehler betrifft nur ein Dokument), vermeidet unnötige
- * Netzwerklast für nicht geöffnete Dateien und spiegelt die
- * Server-Datenmodellierung (`documents`-Tabelle, ein Row pro Datei) 1:1.
+ * Design decision (instead of a single shared Y.Doc with one Y.Text per file
+ * for the whole vault): the wire protocol explicitly binds the connection to
+ * exactly one `documentId`, and live cursor presence is only relevant among
+ * users who have the same file open anyway. A Y.Doc per file keeps the blast
+ * radius small (a parse/encoding error affects only one document), avoids
+ * unnecessary network load for files that aren't open, and mirrors the
+ * server-side data model (`documents` table, one row per file) 1:1.
  */
 export class DocumentSession {
 	readonly doc = new Y.Doc();
@@ -68,9 +66,9 @@ export class DocumentSession {
 	}
 
 	/**
-	 * Seedet ein frisches, leeres Y.Text mit dem aktuellen lokalen
-	 * Dateiinhalt (nur relevant, wenn diese Datei zum allerersten Mal
-	 * synchronisiert wird und noch keine Remote-Historie existiert).
+	 * Seeds a fresh, empty Y.Text with the current local file content (only
+	 * relevant when this file is being synchronized for the very first time
+	 * and no remote history exists yet).
 	 */
 	seedIfEmpty(localContent: string): void {
 		if (this.ytext.length > 0 || localContent.length === 0) return;

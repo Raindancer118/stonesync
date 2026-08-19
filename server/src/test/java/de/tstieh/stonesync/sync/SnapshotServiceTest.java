@@ -39,19 +39,55 @@ class SnapshotServiceTest {
     }
 
     @Test
-    @DisplayName("nach erfolgreichem Snapshot-Save wird das alte Update-Log geloescht")
-    void logIsDeletedOnlyAfterSuccessfulSnapshotSave() {
+    @DisplayName("with a previously marked watermark, the snapshot save only deletes log entries up to that watermark")
+    void logIsDeletedOnlyUpToTheRecordedWatermarkAfterSuccessfulSnapshotSave() {
         byte[] snapshotBytes = {9, 9, 9};
+        service.markPendingSnapshot(documentId, 42L);
 
         service.replaceLogWithSnapshot(documentId, snapshotBytes);
 
         InOrder order = inOrder(snapshotRepository, updateRepository);
         order.verify(snapshotRepository).save(any(YjsSnapshotEntity.class));
-        order.verify(updateRepository).deleteByDocumentId(documentId);
+        order.verify(updateRepository).deleteByDocumentIdAndIdLessThanEqual(documentId, 42L);
+        verify(updateRepository, never()).deleteByDocumentId(any());
     }
 
     @Test
-    @DisplayName("schlaegt das Speichern des Snapshots fehl, bleibt das Update-Log unangetastet")
+    @DisplayName("without a marked watermark, nothing is deleted during the snapshot save (no blind discarding)")
+    void doesNotDeleteAnythingWithoutARecordedWatermark() {
+        service.replaceLogWithSnapshot(documentId, new byte[]{1});
+
+        verify(updateRepository, never()).deleteByDocumentId(any());
+        verify(updateRepository, never()).deleteByDocumentIdAndIdLessThanEqual(any(), any());
+    }
+
+    @Test
+    @DisplayName("updates that arrive concurrently while a snapshot is being built (id > watermark) survive compaction")
+    void updatesAppendedAfterTheWatermarkSurviveCompaction() {
+        // Watermark was set at id=5 (state at the time of REQUEST_SNAPSHOT).
+        // A concurrent update with id=6 arrived WHILE the client was building the snapshot.
+        service.markPendingSnapshot(documentId, 5L);
+
+        service.replaceLogWithSnapshot(documentId, new byte[]{1, 2, 3});
+
+        // Only deleted up to id=5 - id=6 (the concurrently added update) is preserved.
+        verify(updateRepository).deleteByDocumentIdAndIdLessThanEqual(documentId, 5L);
+        verify(updateRepository, never()).deleteByDocumentId(any());
+    }
+
+    @Test
+    @DisplayName("the watermark is consumed after use and does not affect the next snapshot")
+    void watermarkIsConsumedAfterUse() {
+        service.markPendingSnapshot(documentId, 5L);
+        service.replaceLogWithSnapshot(documentId, new byte[]{1});
+
+        service.replaceLogWithSnapshot(documentId, new byte[]{2});
+
+        verify(updateRepository, org.mockito.Mockito.times(1)).deleteByDocumentIdAndIdLessThanEqual(documentId, 5L);
+    }
+
+    @Test
+    @DisplayName("if saving the snapshot fails, the update log remains untouched")
     void logIsNotDeletedWhenSnapshotSaveFails() {
         when(snapshotRepository.save(any(YjsSnapshotEntity.class)))
                 .thenThrow(new RuntimeException("db unavailable"));
