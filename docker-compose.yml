@@ -27,6 +27,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       STORAGE_PATH: /data/vault
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      CONSOLE_API_KEY: ${CONSOLE_API_KEY:-}
     volumes:
       - stonesync-vault:/data/vault
     networks:
