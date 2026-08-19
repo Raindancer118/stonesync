@@ -1,0 +1,15 @@
+spring:
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+stonesync:
+  ticket:
+    ttl-seconds: 15
+  sync:
+    snapshot-threshold-count: 200
+    snapshot-threshold-bytes: 524288
+  storage:
+    path: ${java.io.tmpdir:/tmp}/stonesync-test

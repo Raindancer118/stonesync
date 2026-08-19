@@ -1,0 +1,234 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as Y from "yjs";
+import { Awareness } from "y-protocols/awareness";
+import { StoneSyncSocket, WebSocketLike } from "./StoneSyncSocket";
+import { decodeMessage, MessageType } from "../protocol/prefix";
+import { ReconnectBackoff } from "./backoff";
+
+/** Minimale, steuerbare Fake-Implementierung von WebSocketLike für Tests. */
+class FakeWebSocket implements WebSocketLike {
+	static instances: FakeWebSocket[] = [];
+	readyState = 0; // CONNECTING
+	binaryType = "";
+	onopen: (() => void) | null = null;
+	onclose: (() => void) | null = null;
+	onerror: ((err: unknown) => void) | null = null;
+	onmessage: ((event: { data: unknown }) => void) | null = null;
+	sent: unknown[] = [];
+
+	constructor(public url: string) {
+		FakeWebSocket.instances.push(this);
+	}
+
+	send(data: ArrayBufferLike | ArrayBufferView | string): void {
+		this.sent.push(data);
+	}
+
+	close(): void {
+		this.readyState = 3; // CLOSED
+		this.onclose?.();
+	}
+
+	simulateOpen(): void {
+		this.readyState = 1; // OPEN
+		this.onopen?.();
+	}
+
+	simulateMessage(data: unknown): void {
+		this.onmessage?.({ data });
+	}
+
+	simulateServerClose(): void {
+		this.readyState = 3;
+		this.onclose?.();
+	}
+}
+
+function makeSocket() {
+	FakeWebSocket.instances = [];
+	const doc = new Y.Doc();
+	const awareness = new Awareness(doc);
+	let ticketCalls = 0;
+	const getTicket = vi.fn(async () => {
+		ticketCalls++;
+		return `ticket-${ticketCalls}`;
+	});
+
+	const statusChanges: string[] = [];
+	const socket = new StoneSyncSocket({
+		wsBaseUrl: "wss://server.example.com",
+		documentId: "doc-123",
+		getTicket,
+		doc,
+		awareness,
+		backoff: new ReconnectBackoff({ baseDelayMs: 100, maxDelayMs: 1000, jitter: () => 0.5 }),
+		webSocketFactory: (url) => new FakeWebSocket(url),
+		onStatusChange: (s) => statusChanges.push(s),
+	});
+
+	return { socket, doc, awareness, getTicket, statusChanges };
+}
+
+describe("StoneSyncSocket", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("requests a ticket and connects to the correct URL with documentId", async () => {
+		const { socket, getTicket } = makeSocket();
+		await socket.connect();
+
+		expect(getTicket).toHaveBeenCalledTimes(1);
+		expect(FakeWebSocket.instances).toHaveLength(1);
+		expect(FakeWebSocket.instances[0].url).toBe(
+			"wss://server.example.com/ws/sync/doc-123?ticket=ticket-1"
+		);
+	});
+
+	it("sends local doc updates as 0x00-prefixed frames once connected", async () => {
+		const { socket, doc } = makeSocket();
+		await socket.connect();
+		const ws = FakeWebSocket.instances[0];
+		ws.simulateOpen();
+		ws.sent = []; // clear the initial resync frame
+
+		doc.getText("content").insert(0, "hello");
+
+		expect(ws.sent).toHaveLength(1);
+		const frame = ws.sent[0] as Uint8Array;
+		const decoded = decodeMessage(frame);
+		expect(decoded.type).toBe(MessageType.DocUpdate);
+	});
+
+	it("sends awareness updates as 0x01-prefixed frames", async () => {
+		const { socket, awareness } = makeSocket();
+		await socket.connect();
+		const ws = FakeWebSocket.instances[0];
+		ws.simulateOpen();
+		ws.sent = [];
+
+		awareness.setLocalStateField("cursor", { line: 3, ch: 1 });
+
+		expect(ws.sent.length).toBeGreaterThanOrEqual(1);
+		const decoded = decodeMessage(ws.sent[ws.sent.length - 1] as Uint8Array);
+		expect(decoded.type).toBe(MessageType.AwarenessUpdate);
+	});
+
+	it("applies an incoming 0x00 doc-update frame to the local Y.Doc", async () => {
+		const { socket, doc } = makeSocket();
+		await socket.connect();
+		const ws = FakeWebSocket.instances[0];
+		ws.simulateOpen();
+
+		const remoteDoc = new Y.Doc();
+		remoteDoc.getText("content").insert(0, "from remote");
+		const update = Y.encodeStateAsUpdate(remoteDoc);
+		const frame = new Uint8Array(update.length + 1);
+		frame[0] = 0x00;
+		frame.set(update, 1);
+
+		ws.simulateMessage(frame);
+
+		expect(doc.getText("content").toString()).toBe("from remote");
+	});
+
+	it("applies an incoming 0x01 awareness-update frame", async () => {
+		const { socket, awareness } = makeSocket();
+		await socket.connect();
+		const ws = FakeWebSocket.instances[0];
+		ws.simulateOpen();
+
+		const remoteDoc = new Y.Doc();
+		const remoteAwareness = new Awareness(remoteDoc);
+		remoteAwareness.setLocalStateField("user", { name: "Remote User" });
+		const { encodeAwarenessUpdate } = await import("y-protocols/awareness");
+		const update = encodeAwarenessUpdate(remoteAwareness, [remoteAwareness.clientID]);
+		const frame = new Uint8Array(update.length + 1);
+		frame[0] = 0x01;
+		frame.set(update, 1);
+
+		ws.simulateMessage(frame);
+
+		const states = Array.from(awareness.getStates().values());
+		expect(states.some((s) => (s as { user?: { name?: string } }).user?.name === "Remote User")).toBe(
+			true
+		);
+	});
+
+	it("replies with a binary 0x03 SNAPSHOT_PAYLOAD frame on a 0x02 REQUEST_SNAPSHOT frame", async () => {
+		const { socket, doc } = makeSocket();
+		doc.getText("content").insert(0, "snapshot me");
+		await socket.connect();
+		const ws = FakeWebSocket.instances[0];
+		ws.simulateOpen();
+		ws.sent = [];
+
+		// Server sendet REQUEST_SNAPSHOT als reines Präfix-Byte ohne Payload.
+		ws.simulateMessage(new Uint8Array([0x02]));
+
+		expect(ws.sent).toHaveLength(1);
+		const decoded = decodeMessage(ws.sent[0] as Uint8Array);
+		expect(decoded.type).toBe(MessageType.SnapshotPayload);
+
+		const target = new Y.Doc();
+		Y.applyUpdate(target, decoded.payload);
+		expect(target.getText("content").toString()).toBe("snapshot me");
+	});
+
+	it("reconnects with backoff after an unexpected close, and resyncs local edits made offline", async () => {
+		const { socket, doc } = makeSocket();
+		await socket.connect();
+		const firstWs = FakeWebSocket.instances[0];
+		firstWs.simulateOpen();
+
+		// connection drops unexpectedly (not via disconnect())
+		firstWs.simulateServerClose();
+
+		// local edit made while offline
+		doc.getText("content").insert(0, "offline edit");
+
+		// backoff base delay is 100ms
+		await vi.advanceTimersByTimeAsync(100);
+
+		expect(FakeWebSocket.instances).toHaveLength(2);
+		const secondWs = FakeWebSocket.instances[1];
+		secondWs.simulateOpen();
+
+		// resync sends the offline doc-diff, plus a re-announcement of the
+		// local awareness state (presence) after reconnecting
+		expect(secondWs.sent.length).toBeGreaterThanOrEqual(1);
+		const decoded = decodeMessage(secondWs.sent[0] as Uint8Array);
+		expect(decoded.type).toBe(MessageType.DocUpdate);
+
+		const target = new Y.Doc();
+		Y.applyUpdate(target, decoded.payload);
+		expect(target.getText("content").toString()).toBe("offline edit");
+	});
+
+	it("does not reconnect after an explicit disconnect()", async () => {
+		const { socket } = makeSocket();
+		await socket.connect();
+		const ws = FakeWebSocket.instances[0];
+		ws.simulateOpen();
+
+		socket.disconnect();
+		await vi.advanceTimersByTimeAsync(5000);
+
+		expect(FakeWebSocket.instances).toHaveLength(1);
+		expect(socket.getStatus()).toBe("closed");
+	});
+
+	it("reports connection status transitions", async () => {
+		const { socket, statusChanges } = makeSocket();
+		await socket.connect();
+		const ws = FakeWebSocket.instances[0];
+		ws.simulateOpen();
+
+		expect(statusChanges).toContain("connecting");
+		expect(statusChanges).toContain("connected");
+	});
+});

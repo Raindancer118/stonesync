@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server:
+    name: Server (Maven)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Test
+        working-directory: server
+        run: mvn -B test
+      - name: Package
+        working-directory: server
+        run: mvn -B package -DskipTests
+
+  plugin:
+    name: Plugin (TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+      - name: Install
+        working-directory: plugin
+        run: npm ci --legacy-peer-deps
+      - name: Typecheck
+        working-directory: plugin
+        run: npm run typecheck
+      - name: Test
+        working-directory: plugin
+        run: npm test -- --run
+      - name: Build
+        working-directory: plugin
+        run: npm run build

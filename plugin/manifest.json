@@ -1,0 +1,10 @@
+{
+  "id": "stonesync",
+  "name": "StoneSync",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Echtes Live-Multi-User-Sync mehrerer Nutzer am selben Vault/Dokument (Yjs CRDT) inkl. Live-Cursor-Presence, verbunden mit einem StoneSync-Server.",
+  "author": "Raindancer118",
+  "authorUrl": "https://github.com/Raindancer118",
+  "isDesktopOnly": false
+}

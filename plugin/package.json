@@ -1,0 +1,42 @@
+{
+  "name": "stonesync",
+  "version": "0.1.0",
+  "description": "Live-Multi-User-Sync für Obsidian-Vaults (Yjs CRDT + Live-Cursor-Presence)",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "typecheck": "tsc -noEmit -skipLibCheck",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "obsidian-plugin",
+    "sync",
+    "crdt",
+    "yjs"
+  ],
+  "author": "Raindancer118",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.24.2",
+    "obsidian": "^1.7.2",
+    "tslib": "^2.8.1",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "@codemirror/state": "^6.5.1",
+    "@codemirror/view": "^6.36.1",
+    "y-codemirror.next": "^0.3.6",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.20"
+  },
+  "allowScripts": {
+    "esbuild@0.24.2": true,
+    "esbuild@0.21.5": true
+  }
+}

@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+jobs:
+  plugin-release:
+    name: Plugin release asset
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+      - name: Install
+        working-directory: plugin
+        run: npm ci --legacy-peer-deps
+      - name: Sync manifest version with tag
+        working-directory: plugin
+        run: |
+          node -e "
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+            manifest.version = '${GITHUB_REF_NAME}';
+            fs.writeFileSync('manifest.json', JSON.stringify(manifest, null, '\t') + '\n');
+          "
+      - name: Build
+        working-directory: plugin
+        run: npm run build
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            plugin/main.js
+            plugin/manifest.json
+
+  server-image-build:
+    name: Server Docker image (build-only, no registry push)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        working-directory: server
+        run: docker build -t stonesync-server:${GITHUB_REF_NAME} .

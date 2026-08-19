@@ -1,0 +1,20 @@
+# Plugin (Node/TypeScript)
+plugin/node_modules/
+plugin/main.js
+plugin/*.tsbuildinfo
+
+# Server (Maven/Java)
+server/target/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+
+# Env
+.env
+*.env
+.env.*
