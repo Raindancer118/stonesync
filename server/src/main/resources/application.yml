@@ -27,6 +27,10 @@ stonesync:
     snapshot-threshold-bytes: 524288
   storage:
     path: ${STORAGE_PATH:/data/vault}
+  bootstrap:
+    admin-email: ${BOOTSTRAP_ADMIN_EMAIL:}
+    vault-name: ${BOOTSTRAP_VAULT_NAME:Default Vault}
+    device-name: ${BOOTSTRAP_DEVICE_NAME:bootstrap}
 
 logging:
   level:
