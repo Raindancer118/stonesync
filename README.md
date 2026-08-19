@@ -1,35 +1,109 @@
+<div align="center">
+
 # StoneSync
 
-Obsidian.MD-Plugin mit echtem Live-Multi-User-Sync (Yjs CRDT, Live-Cursor-Presence)
-gegen einen selbst gehosteten Java-Server.
+**Real-time multi-user collaboration for Obsidian, on your own server.**
 
-## Struktur
+Multiple people editing the same vault, at the same time, with live cursors —
+no cloud subscription, no vendor lock-in, self-hosted on hardware you control.
 
-- `plugin/` — Obsidian-Plugin (TypeScript, esbuild, Yjs)
-- `server/` — Sync-Backend (Java 21, Spring Boot, Postgres)
-- `docker-compose.yml` — Server + Postgres lokal/self-hosted starten
+[![CI](https://github.com/Raindancer118/stonesync/actions/workflows/ci.yml/badge.svg)](https://github.com/Raindancer118/stonesync/actions/workflows/ci.yml)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+[![Java 21](https://img.shields.io/badge/server-Java%2021%20%2F%20Spring%20Boot-orange)](server)
+[![Obsidian Plugin](https://img.shields.io/badge/plugin-TypeScript%20%2F%20Yjs-8a2be2)](plugin)
 
-## Server lokal starten
+</div>
+
+---
+
+## What is this?
+
+Obsidian is single-player by design. StoneSync makes it multiplayer.
+
+Install the plugin, point it at your own StoneSync server, and every note
+becomes a shared, conflict-free document — edited by however many people have
+access, with each person's cursor visible to everyone else in real time.
+Behind the scenes it's a [Yjs](https://yjs.dev) CRDT, so concurrent edits
+never produce merge conflicts or "(Conflicted copy)" files: everyone's
+changes just converge.
+
+```mermaid
+flowchart LR
+    subgraph Devices
+        A[Obsidian<br/>Desktop] 
+        B[Obsidian<br/>Mobile]
+        C[Obsidian<br/>Desktop]
+    end
+    A <-- WebSocket<br/>ticket auth --> S[(StoneSync Server<br/>Spring Boot)]
+    B <-- WebSocket<br/>ticket auth --> S
+    C <-- WebSocket<br/>ticket auth --> S
+    S <--> DB[(Postgres<br/>metadata + Yjs log)]
+    S <--> FS[/Filesystem<br/>attachments/]
+```
+
+## How it stays fast *and* honest
+
+The server never tries to understand your notes. It's a deliberately "dumb"
+relay: Yjs updates are opaque binary blobs it stores and forwards, never
+parses. That keeps the Java side small and lets the actual CRDT logic — the
+part that has to be correct — live entirely in the well-tested Yjs library on
+the client.
+
+| Concern | How StoneSync handles it |
+|---|---|
+| **Conflicting edits** | CRDT merge (Yjs) — no conflict files, no lost writes |
+| **Live cursors / presence** | Separate ephemeral channel, never persisted |
+| **Auth on the sync socket** | Short-lived, single-use tickets (Obsidian's WebSocket client can't send custom headers, so long-lived keys never touch the URL or a proxy log) |
+| **Access control** | Every document/attachment/socket operation is checked against real vault membership — no security-through-obscurity on UUIDs |
+| **Attachments** | Content-addressed by a *server-verified* SHA-256, uploaded only once per unique file |
+| **Renames** | Pure metadata update — the document's identity (and its edit history) never changes, so links don't break |
+| **Deletes** | Tombstoned, not dropped — offline devices reconcile safely when they reconnect |
+
+## Project layout
 
 ```
-cp .env.example .env   # DB_PASSWORD setzen
+StoneSync/
+├── plugin/             Obsidian plugin — TypeScript, esbuild, Yjs
+├── server/              Sync backend — Java 21, Spring Boot, Postgres
+├── docker-compose.yml   Server + Postgres, self-hosted
+└── .github/workflows/   CI (build + test) and release automation
+```
+
+## Getting started
+
+### Run the server
+
+```bash
+cp .env.example .env      # set DB_PASSWORD
 docker compose up --build
 ```
 
-## Plugin lokal bauen
+On first boot with `BOOTSTRAP_ADMIN_EMAIL` set, the server prints a one-time
+admin API key to its logs — that's your master key for creating additional
+users, vaults, and devices via `/api/admin/*`.
 
-```
+### Build the plugin
+
+```bash
 cd plugin
 npm install --legacy-peer-deps
 npm test
 npm run build
 ```
 
-`main.js`, `manifest.json` nach `<Vault>/.obsidian/plugins/stonesync/` kopieren
-und in Obsidian aktivieren.
+Copy `main.js` and `manifest.json` into
+`<your-vault>/.obsidian/plugins/stonesync/`, then enable the plugin in
+Obsidian's settings and point it at your server + API key.
 
 ## Status
 
-MVP-Fokus: Plugin + Server mit echtem Multi-User-Sync direkt in Obsidian
-(Text-Sync via Yjs, Live-Cursor-Presence, Attachment-Sync). Ein Web-Viewer
-ist bewusst noch nicht Teil dieses Standes.
+This is the MVP: the plugin and server deliver real, working multi-user
+sync directly inside Obsidian — text sync, live cursors, attachment sync,
+vault-scoped access control. A standalone web viewer (for reviewing a vault
+without installing Obsidian) is a deliberately separate milestone and not
+part of this release yet.
+
+## License
+
+[AGPL-3.0](LICENSE) — if you run a modified version of this server as a
+network service, its source must remain available to its users.
