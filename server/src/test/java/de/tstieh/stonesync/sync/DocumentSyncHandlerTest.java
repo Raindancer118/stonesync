@@ -11,8 +11,11 @@ import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.WebSocketSession;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -21,6 +24,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -34,6 +38,10 @@ class DocumentSyncHandlerTest {
     @Mock
     private SyncSessionRegistry registry;
     @Mock
+    private YjsSnapshotRepository snapshotRepository;
+    @Mock
+    private YjsUpdateRepository updateRepository;
+    @Mock
     private WebSocketSession sender;
     @Mock
     private WebSocketSession otherClient;
@@ -43,7 +51,8 @@ class DocumentSyncHandlerTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        handler = new DocumentSyncHandler(updateLogService, snapshotService, registry);
+        handler = new DocumentSyncHandler(updateLogService, snapshotService, registry,
+                snapshotRepository, updateRepository);
 
         Map<String, Object> attrs = new HashMap<>();
         lenient().when(sender.getUri()).thenReturn(URI.create("/ws/sync/" + documentId));
@@ -52,6 +61,8 @@ class DocumentSyncHandlerTest {
         lenient().when(sender.isOpen()).thenReturn(true);
         lenient().when(otherClient.getId()).thenReturn("other-session");
         lenient().when(otherClient.isOpen()).thenReturn(true);
+        lenient().when(snapshotRepository.findById(documentId)).thenReturn(Optional.empty());
+        lenient().when(updateRepository.findByDocumentIdOrderByIdAsc(documentId)).thenReturn(List.of());
     }
 
     private byte[] messageOf(int prefix, byte... payload) {
@@ -129,5 +140,46 @@ class DocumentSyncHandlerTest {
         handler.handleMessage(sender, new BinaryMessage(messageOf(0x00, (byte) 1)));
 
         verify(snapshotService).markPendingSnapshot(documentId, 99L);
+    }
+
+    @Test
+    @DisplayName("on connect, an existing snapshot and update log are replayed to the new session only, followed by CAUGHT_UP")
+    void connectingSessionReceivesExistingSnapshotAndUpdatesFollowedByCaughtUp() throws Exception {
+        when(snapshotRepository.findById(documentId))
+                .thenReturn(Optional.of(new YjsSnapshotEntity(documentId, new byte[]{1, 1}, Instant.now())));
+        when(updateRepository.findByDocumentIdOrderByIdAsc(documentId)).thenReturn(List.of(
+                new YjsUpdateEntity(documentId, new byte[]{2, 2}, Instant.now()),
+                new YjsUpdateEntity(documentId, new byte[]{3, 3}, Instant.now())));
+
+        handler.afterConnectionEstablished(sender);
+
+        ArgumentCaptor<BinaryMessage> captor = ArgumentCaptor.forClass(BinaryMessage.class);
+        verify(sender, times(4)).sendMessage(captor.capture());
+        List<BinaryMessage> sent = captor.getAllValues();
+
+        assertThat(sent.get(0).getPayload().array()).containsExactly(0x00, 1, 1);
+        assertThat(sent.get(1).getPayload().array()).containsExactly(0x00, 2, 2);
+        assertThat(sent.get(2).getPayload().array()).containsExactly(0x00, 3, 3);
+        assertThat(sent.get(3).getPayload().array()).containsExactly(0x04);
+
+        verify(otherClient, never()).sendMessage(any(BinaryMessage.class));
+    }
+
+    @Test
+    @DisplayName("on connect with no existing history, only CAUGHT_UP is sent (no empty snapshot/update frames)")
+    void connectingSessionWithNoHistoryReceivesOnlyCaughtUp() throws Exception {
+        handler.afterConnectionEstablished(sender);
+
+        ArgumentCaptor<BinaryMessage> captor = ArgumentCaptor.forClass(BinaryMessage.class);
+        verify(sender, times(1)).sendMessage(captor.capture());
+        assertThat(captor.getValue().getPayload().array()).containsExactly(0x04);
+    }
+
+    @Test
+    @DisplayName("connecting still registers the session in the registry, exactly as before")
+    void connectingStillRegistersInRegistry() throws Exception {
+        handler.afterConnectionEstablished(sender);
+
+        verify(registry).register(documentId, sender);
     }
 }

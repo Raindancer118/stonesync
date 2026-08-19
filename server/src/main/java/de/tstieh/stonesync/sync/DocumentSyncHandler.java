@@ -11,6 +11,8 @@ import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -24,6 +26,7 @@ import java.util.UUID;
  *   <li>{@code 0x01} awareness update (cursor/presence) - relayed live, never persisted.</li>
  *   <li>{@code 0x02} REQUEST_SNAPSHOT - server -&gt; client only.</li>
  *   <li>{@code 0x03} snapshot payload - client's answer to a REQUEST_SNAPSHOT, compacts the log.</li>
+ *   <li>{@code 0x04} CAUGHT_UP - server -&gt; client only, see {@link #afterConnectionEstablished}.</li>
  * </ul>
  */
 @Component
@@ -34,17 +37,53 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler {
     private final UpdateLogService updateLogService;
     private final SnapshotService snapshotService;
     private final SyncSessionRegistry registry;
+    private final YjsSnapshotRepository snapshotRepository;
+    private final YjsUpdateRepository updateRepository;
 
     public DocumentSyncHandler(UpdateLogService updateLogService, SnapshotService snapshotService,
-                                SyncSessionRegistry registry) {
+                                SyncSessionRegistry registry, YjsSnapshotRepository snapshotRepository,
+                                YjsUpdateRepository updateRepository) {
         this.updateLogService = updateLogService;
         this.snapshotService = snapshotService;
         this.registry = registry;
+        this.snapshotRepository = snapshotRepository;
+        this.updateRepository = updateRepository;
     }
 
+    /**
+     * Registers the session, then replays the document's existing history to it alone (never
+     * broadcast - every other already-connected session already has this state applied).
+     * Without this, a freshly connecting client with an empty local Y.Doc would receive nothing
+     * unless another device happened to be online and pushing live updates at that exact
+     * moment - the "dumb relay" design never implemented a sync-step-1/2 handshake, so this is
+     * the one place that catch-up has to happen. The client applies each 0x00 frame via the
+     * same `Y.applyUpdate` path it already uses for live updates - no new merge logic needed on
+     * either side, just a marker (CAUGHT_UP) so the client knows when the replay burst ends,
+     * sent even when there is nothing to replay so the signal is always deterministic.
+     */
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
-        registry.register(documentIdOf(session), session);
+        UUID documentId = documentIdOf(session);
+        registry.register(documentId, session);
+
+        Optional<YjsSnapshotEntity> snapshot = snapshotRepository.findById(documentId);
+        if (snapshot.isPresent()) {
+            sendSafely(session, prefixed(SyncMessageType.DOC_UPDATE, snapshot.get().getStateBytes()));
+        }
+
+        List<YjsUpdateEntity> updates = updateRepository.findByDocumentIdOrderByIdAsc(documentId);
+        for (YjsUpdateEntity update : updates) {
+            sendSafely(session, prefixed(SyncMessageType.DOC_UPDATE, update.getUpdateBytes()));
+        }
+
+        sendSafely(session, new byte[]{SyncMessageType.CAUGHT_UP});
+    }
+
+    private static byte[] prefixed(byte prefix, byte[] payload) {
+        byte[] frame = new byte[payload.length + 1];
+        frame[0] = prefix;
+        System.arraycopy(payload, 0, frame, 1, payload.length);
+        return frame;
     }
 
     @Override

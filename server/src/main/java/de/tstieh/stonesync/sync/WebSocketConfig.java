@@ -20,7 +20,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(documentSyncHandler, "/ws/sync/{documentId}")
+        registry.addHandler(new ConcurrentSendWebSocketHandlerDecorator(documentSyncHandler), "/ws/sync/{documentId}")
                 .addInterceptors(handshakeInterceptor)
                 .setAllowedOriginPatterns("*");
     }
