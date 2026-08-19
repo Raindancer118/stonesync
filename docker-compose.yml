@@ -17,6 +17,7 @@ services:
   server:
     build:
       context: ./server
+    container_name: stonesync-server
     depends_on:
       postgres:
         condition: service_healthy
@@ -25,12 +26,18 @@ services:
       DB_USER: stonesync
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       STORAGE_PATH: /data/vault
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
     volumes:
       - stonesync-vault:/data/vault
-    ports:
-      - "127.0.0.1:8080:8080"
+    networks:
+      - default
+      - webproxy
     restart: unless-stopped
 
 volumes:
   stonesync-postgres:
   stonesync-vault:
+
+networks:
+  webproxy:
+    external: true
