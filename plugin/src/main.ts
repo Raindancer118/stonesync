@@ -66,7 +66,7 @@ export default class StoneSyncPlugin extends Plugin {
 
 		this.registerEvent(
 			this.app.vault.on("delete", (file: TAbstractFile) => {
-				this.syncManager?.handleDelete(file.path);
+				void this.syncManager?.handleDelete(file.path);
 			})
 		);
 

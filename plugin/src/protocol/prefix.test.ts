@@ -75,6 +75,18 @@ describe("prefix protocol", () => {
 		expect(decoded.payload).toEqual(payload);
 	});
 
+	it("decodes a single-byte CAUGHT_UP frame (0x04, no payload)", () => {
+		const decoded = decodeMessage(new Uint8Array([0x04]));
+		expect(decoded.type).toBe(MessageType.CaughtUp);
+		expect(decoded.payload.length).toBe(0);
+	});
+
+	it("decodes a single-byte DELETE_NOTICE frame (0x06, no payload)", () => {
+		const decoded = decodeMessage(new Uint8Array([0x06]));
+		expect(decoded.type).toBe(MessageType.DeleteNotice);
+		expect(decoded.payload.length).toBe(0);
+	});
+
 	it("does not mutate the source payload buffer", () => {
 		const payload = new Uint8Array([1, 2, 3]);
 		const encoded = encodeMessage(MessageType.DocUpdate, payload);

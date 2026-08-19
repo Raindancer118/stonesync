@@ -9,6 +9,8 @@ public final class SyncMessageType {
     public static final byte SNAPSHOT_PAYLOAD = 0x03;
     /** Server-&gt;client only: marks the end of the on-connect catch-up replay burst. */
     public static final byte CAUGHT_UP = 0x04;
+    /** Server-&gt;client only: the document was deleted, connected clients should remove it locally. */
+    public static final byte DELETE_NOTICE = 0x06;
 
     private SyncMessageType() {
     }

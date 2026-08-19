@@ -27,10 +27,11 @@ import java.util.UUID;
  *   <li>{@code 0x02} REQUEST_SNAPSHOT - server -&gt; client only.</li>
  *   <li>{@code 0x03} snapshot payload - client's answer to a REQUEST_SNAPSHOT, compacts the log.</li>
  *   <li>{@code 0x04} CAUGHT_UP - server -&gt; client only, see {@link #afterConnectionEstablished}.</li>
+ *   <li>{@code 0x06} DELETE_NOTICE - server -&gt; client only, see {@link #broadcastDeleteNotice}.</li>
  * </ul>
  */
 @Component
-public class DocumentSyncHandler extends AbstractWebSocketHandler {
+public class DocumentSyncHandler extends AbstractWebSocketHandler implements DocumentDeletionBroadcaster {
 
     private static final Logger log = LoggerFactory.getLogger(DocumentSyncHandler.class);
 
@@ -115,6 +116,20 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler {
             snapshotService.replaceLogWithSnapshot(documentId, payload);
         } else {
             log.warn("Unknown sync message prefix {} for document {}", prefix, documentId);
+        }
+    }
+
+    /**
+     * Called by {@link DocumentService} right after a document is tombstoned, so any device
+     * with that file open elsewhere reacts immediately (removes the local file, tears down its
+     * session) instead of only finding out on its next reconnect.
+     */
+    @Override
+    public void broadcastDeleteNotice(UUID documentId) {
+        for (WebSocketSession peer : registry.sessionsFor(documentId)) {
+            if (peer.isOpen()) {
+                sendSafely(peer, new byte[]{SyncMessageType.DELETE_NOTICE});
+            }
         }
     }
 

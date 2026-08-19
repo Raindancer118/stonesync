@@ -12,6 +12,10 @@ export interface DocumentSessionOptions {
 	userColor: string;
 	onStatusChange?: (status: ConnectionStatus) => void;
 	onError?: (error: unknown) => void;
+	/** See `StoneSyncSocketOptions.onCaughtUp`. */
+	onCaughtUp?: () => void;
+	/** See `StoneSyncSocketOptions.onDeleteNotice`. */
+	onDeleteNotice?: () => void;
 }
 
 /**
@@ -33,6 +37,7 @@ export class DocumentSession {
 	readonly awareness = new Awareness(this.doc);
 	private readonly socket: StoneSyncSocket;
 	private connected = false;
+	private caughtUpResolvers: Array<() => void> = [];
 
 	constructor(private readonly options: DocumentSessionOptions) {
 		this.awareness.setLocalStateField("user", {
@@ -48,6 +53,25 @@ export class DocumentSession {
 			awareness: this.awareness,
 			onStatusChange: options.onStatusChange,
 			onError: options.onError,
+			onCaughtUp: () => {
+				options.onCaughtUp?.();
+				const resolvers = this.caughtUpResolvers;
+				this.caughtUpResolvers = [];
+				resolvers.forEach((resolve) => resolve());
+			},
+			onDeleteNotice: options.onDeleteNotice,
+		});
+	}
+
+	/**
+	 * Resolves the next time the server's on-connect history replay burst finishes (see
+	 * `StoneSyncSocketOptions.onCaughtUp`). Intended for one-shot flows (e.g. a bulk vault
+	 * download) that need to know when a freshly connected, empty local doc has received all
+	 * existing content - not a general "is it caught up right now" query.
+	 */
+	waitUntilCaughtUp(): Promise<void> {
+		return new Promise((resolve) => {
+			this.caughtUpResolvers.push(resolve);
 		});
 	}
 

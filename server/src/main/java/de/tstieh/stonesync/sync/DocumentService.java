@@ -21,11 +21,14 @@ public class DocumentService {
 
     private final DocumentRepository repository;
     private final VaultAccessService vaultAccessService;
+    private final DocumentDeletionBroadcaster deletionBroadcaster;
     private final Clock clock;
 
-    public DocumentService(DocumentRepository repository, VaultAccessService vaultAccessService, Clock clock) {
+    public DocumentService(DocumentRepository repository, VaultAccessService vaultAccessService,
+                            DocumentDeletionBroadcaster deletionBroadcaster, Clock clock) {
         this.repository = repository;
         this.vaultAccessService = vaultAccessService;
+        this.deletionBroadcaster = deletionBroadcaster;
         this.clock = clock;
     }
 
@@ -45,6 +48,7 @@ public class DocumentService {
         vaultAccessService.requireAccess(userId, document.getVaultId());
         document.markDeleted(clock.instant());
         repository.save(document);
+        deletionBroadcaster.broadcastDeleteNotice(documentId);
     }
 
     /**

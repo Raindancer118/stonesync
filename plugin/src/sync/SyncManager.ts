@@ -2,6 +2,7 @@ import { MarkdownView, Notice, TFile, type App } from "obsidian";
 import type { EditorView } from "@codemirror/view";
 import { DocumentSession } from "./DocumentSession";
 import { DocumentIdResolver } from "./DocumentIdResolver";
+import { deleteDocument } from "./DocumentDeleteClient";
 import { syncCompartment, buildCollabExtension, emptyExtension } from "../editor/syncExtension";
 import type { StoneSyncSettings } from "../settings/StoneSyncSettings";
 import { isConfigured } from "../settings/StoneSyncSettings";
@@ -167,10 +168,42 @@ export class SyncManager {
 					);
 				}
 			},
+			onDeleteNotice: () => {
+				void this.handleRemoteDeleteNotice(file.path);
+			},
 		});
 
 		this.sessions.set(file.path, session);
 		return session;
+	}
+
+	/**
+	 * Reacts to the server telling us (via DELETE_NOTICE) that this document was deleted
+	 * elsewhere. Removes the local file and tears the session down - mirrors what
+	 * `handleDelete` does for a *locally* initiated delete, just triggered from the opposite
+	 * direction. Uses the path captured at session-creation time rather than looking it up
+	 * again, since by the time this fires the file may already be gone locally too (e.g. if
+	 * the user deleted it here as well, in a race with another device's delete).
+	 */
+	private async handleRemoteDeleteNotice(path: string): Promise<void> {
+		if (this.currentBoundPath === path) {
+			this.unbindCurrent();
+		} else {
+			const session = this.sessions.get(path);
+			if (session) {
+				session.destroy();
+				this.sessions.delete(path);
+			}
+		}
+		this.resolver?.forget(path);
+
+		try {
+			if (await this.app.vault.adapter.exists(path)) {
+				await this.app.vault.adapter.remove(path);
+			}
+		} catch (error) {
+			console.error("[StoneSync] Failed to remove locally deleted file", path, error);
+		}
 	}
 
 	/** On rename: move the session key + resolver cache along without reconnecting. */
@@ -186,13 +219,29 @@ export class SyncManager {
 		}
 	}
 
-	handleDelete(path: string): void {
+	/**
+	 * Tombstones the document server-side, so other devices actually learn about the
+	 * deletion (previously this only tore down the local session/cache, never told the
+	 * server at all - the file kept existing for everyone else indefinitely).
+	 */
+	async handleDelete(path: string): Promise<void> {
+		const settings = this.getSettings();
+		const documentId = this.resolver?.peekId(path);
+
 		const session = this.sessions.get(path);
 		if (session) {
 			session.destroy();
 			this.sessions.delete(path);
 		}
 		this.resolver?.forget(path);
+
+		if (!documentId || !isConfigured(settings)) return;
+		try {
+			await deleteDocument(settings.serverUrl, settings.apiKey, documentId);
+		} catch (error) {
+			console.error("[StoneSync] Failed to notify server of local delete", path, error);
+			new Notice(`StoneSync: Failed to sync deletion of "${path}" - it may reappear.`);
+		}
 	}
 
 	teardownAll(): void {

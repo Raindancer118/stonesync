@@ -291,6 +291,66 @@ describe("StoneSyncSocket", () => {
 	});
 });
 
+describe("StoneSyncSocket catch-up and delete notice", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("fires onCaughtUp when a 0x04 CAUGHT_UP frame is received", async () => {
+		FakeWebSocket.instances = [];
+		const doc = new Y.Doc();
+		const awareness = new Awareness(doc);
+		let caughtUp = 0;
+		const socket = new StoneSyncSocket({
+			wsBaseUrl: "wss://server.example.com",
+			documentId: "doc-123",
+			getTicket: vi.fn(async () => "ticket-1"),
+			doc,
+			awareness,
+			backoff: new ReconnectBackoff({ baseDelayMs: 100, maxDelayMs: 1000, jitter: () => 0.5 }),
+			webSocketFactory: (url) => new FakeWebSocket(url),
+			onCaughtUp: () => caughtUp++,
+		});
+
+		await socket.connect();
+		const ws = FakeWebSocket.instances[0];
+		ws.simulateOpen();
+
+		ws.simulateMessage(new Uint8Array([0x04]));
+
+		expect(caughtUp).toBe(1);
+	});
+
+	it("fires onDeleteNotice when a 0x06 DELETE_NOTICE frame is received", async () => {
+		FakeWebSocket.instances = [];
+		const doc = new Y.Doc();
+		const awareness = new Awareness(doc);
+		let deleteNotices = 0;
+		const socket = new StoneSyncSocket({
+			wsBaseUrl: "wss://server.example.com",
+			documentId: "doc-123",
+			getTicket: vi.fn(async () => "ticket-1"),
+			doc,
+			awareness,
+			backoff: new ReconnectBackoff({ baseDelayMs: 100, maxDelayMs: 1000, jitter: () => 0.5 }),
+			webSocketFactory: (url) => new FakeWebSocket(url),
+			onDeleteNotice: () => deleteNotices++,
+		});
+
+		await socket.connect();
+		const ws = FakeWebSocket.instances[0];
+		ws.simulateOpen();
+
+		ws.simulateMessage(new Uint8Array([0x06]));
+
+		expect(deleteNotices).toBe(1);
+	});
+});
+
 describe("isAuthError", () => {
 	it("recognizes HTTP 401 and 403 as auth errors", () => {
 		expect(isAuthError({ status: 401 })).toBe(true);

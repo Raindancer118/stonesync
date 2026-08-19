@@ -51,6 +51,11 @@ export class DocumentIdResolver {
 		return body.documentId;
 	}
 
+	/** Returns the cached documentId for a path, if one has been resolved before, without a network call. */
+	peekId(vaultRelativePath: string): string | undefined {
+		return this.cache.get(vaultRelativePath);
+	}
+
 	/** On client-side rename: move the cache key along, so no new resolve call is needed. */
 	rename(oldPath: string, newPath: string): void {
 		const id = this.cache.get(oldPath);

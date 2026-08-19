@@ -32,6 +32,9 @@ class DocumentServiceTest {
     @Mock
     private VaultAccessService vaultAccessService;
 
+    @Mock
+    private DocumentDeletionBroadcaster deletionBroadcaster;
+
     private DocumentService service;
     private final UUID documentId = UUID.randomUUID();
     private final UUID vaultId = UUID.randomUUID();
@@ -40,7 +43,7 @@ class DocumentServiceTest {
     @BeforeEach
     void setUp() {
         Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
-        service = new DocumentService(repository, vaultAccessService, clock);
+        service = new DocumentService(repository, vaultAccessService, deletionBroadcaster, clock);
     }
 
     @Test
@@ -103,6 +106,19 @@ class DocumentServiceTest {
         assertThatThrownBy(() -> service.markDeleted(userId, documentId))
                 .isInstanceOf(VaultAccessDeniedException.class);
         assertThat(doc.isDeleted()).isFalse();
+        verify(deletionBroadcaster, never()).broadcastDeleteNotice(any());
+    }
+
+    @Test
+    @DisplayName("deleting broadcasts a DELETE_NOTICE to any currently-connected sessions for that document")
+    void deleteBroadcastsDeleteNotice() {
+        DocumentEntity doc = new DocumentEntity(documentId, vaultId, "path.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
+        when(repository.findById(documentId)).thenReturn(Optional.of(doc));
+
+        service.markDeleted(userId, documentId);
+
+        verify(deletionBroadcaster).broadcastDeleteNotice(documentId);
     }
 
     @Test

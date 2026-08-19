@@ -43,6 +43,19 @@ export interface StoneSyncSocketOptions {
 	onStatusChange?: (status: ConnectionStatus) => void;
 	/** For logging/diagnostics; never thrown. */
 	onError?: (error: unknown) => void;
+	/**
+	 * Fired once after (re)connecting, when the server's on-connect history replay burst is
+	 * done (existing snapshot + update log, if any, have already been applied via the normal
+	 * DocUpdate/Y.applyUpdate path). Never fired more than once per connection - it marks "no
+	 * more historical replay is coming", not an ongoing sync-state flag.
+	 */
+	onCaughtUp?: () => void;
+	/**
+	 * Fired when the server reports this document was deleted elsewhere. The caller is
+	 * responsible for removing the local file and tearing this session down - this class does
+	 * not do either itself, since it has no knowledge of the local filesystem.
+	 */
+	onDeleteNotice?: () => void;
 }
 
 /**
@@ -231,6 +244,10 @@ export class StoneSyncSocket {
 			applyAwarenessUpdate(this.options.awareness, decoded.payload, this);
 		} else if (decoded.type === MessageType.RequestSnapshot) {
 			this.replyWithSnapshot();
+		} else if (decoded.type === MessageType.CaughtUp) {
+			this.options.onCaughtUp?.();
+		} else if (decoded.type === MessageType.DeleteNotice) {
+			this.options.onDeleteNotice?.();
 		}
 		// SnapshotPayload is never sent back to clients by the server (client->server only).
 	}
