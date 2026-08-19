@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/admin-env.sh
+
+if [ "${1:-}" = "" ]; then
+	echo "Usage: ss-delete-user <userId>" >&2
+	exit 1
+fi
+
+# Server rejects this (409) if the user still owns vaults - transfer ownership
+# or delete those vaults first. API keys and access grants are removed for you.
+http_code=$(curl -s -o /tmp/ss-delete-user.out -w "%{http_code}" -X DELETE "$ADMIN_BASE/users/$1" -H "$ADMIN_AUTH")
+if [ "$http_code" = "409" ]; then
+	echo "Refused: this user still owns vaults. Transfer or delete them first." >&2
+	exit 1
+elif [ "$http_code" -ge 300 ]; then
+	echo "Failed (HTTP $http_code):" >&2
+	cat /tmp/ss-delete-user.out >&2
+	exit 1
+fi
+echo "user $1 deleted."

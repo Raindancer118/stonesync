@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/admin-env.sh
+
+if [ "${2:-}" = "" ]; then
+	echo "Usage: ss-create-vault <name> <ownerUserId>" >&2
+	echo "(run ss-users or ss-create-user first to get a user id)" >&2
+	exit 1
+fi
+
+# Creating a vault does NOT implicitly grant its owner access (see AdminService/
+# AdminController) - without this follow-up grant, the owner would be locked out
+# of the vault they just created by VaultAccessService.requireAccess.
+response=$(curl -sf -X POST "$ADMIN_BASE/vaults" \
+	-H "$ADMIN_AUTH" -H "Content-Type: application/json" \
+	-d "{\"name\":\"$1\",\"ownerId\":\"$2\"}")
+vault_id=$(echo "$response" | jq -r .id)
+
+curl -sf -X POST "$ADMIN_BASE/vaults/$vault_id/access" \
+	-H "$ADMIN_AUTH" -H "Content-Type: application/json" \
+	-d "{\"userId\":\"$2\",\"role\":\"OWNER\"}"
+
+echo "$response" | jq .

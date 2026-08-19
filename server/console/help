@@ -4,14 +4,26 @@ set -eu
 cat <<'EOF'
 StoneSync server console — available commands:
 
-  help              show this list
-  ss-status         health check + JVM/uptime summary
-  ss-vaults         list vaults (id, name, owner)
-  ss-docs [vault]   list documents, optionally filtered by vault id
-  ss-updates        pending (unsnapshotted) Yjs update count per document
-  ss-attachments    attachment count + disk usage of /data/vault
-  ss-users          list users (id, email, created_at — no secrets)
-  ss-apikeys <user> list a user's API keys (id, name, revoked?)
+Read-only (direct DB query, always available):
+  help                              show this list
+  ss-status                         health check + JVM/uptime summary
+  ss-vaults                         list vaults (id, name, owner)
+  ss-docs [vault]                   list documents, optionally filtered by vault id
+  ss-updates                        pending (unsnapshotted) Yjs update count per document
+  ss-attachments                    attachment count + disk usage of /data/vault
+  ss-users                          list users (id, email, created_at — no secrets)
+  ss-apikeys <user>                 list a user's API keys (id, name, revoked?)
+
+Write (via the Admin REST API, needs CONSOLE_API_KEY set on the container):
+  ss-create-user <email>            create a user
+  ss-delete-user <userId>           delete a user (refused if they still own vaults)
+  ss-create-vault <name> <owner>    create a vault and grant its owner OWNER access
+  ss-delete-vault <vaultId>         delete a vault (refused if it still has documents)
+  ss-grant-access <user> <vault> <OWNER|EDITOR|VIEWER>
+                                    grant/change a user's role on a vault
+  ss-revoke-access <user> <vault>   remove a user's access to a vault
+  ss-create-apikey <user> <device>  create a new API key for a user (shown once)
+  ss-revoke-apikey <apiKeyId>       revoke an API key
 
 Container logs are not duplicated here on purpose — use Portainer's own
 "Logs" tab for that (streams `docker logs` directly, no extra tooling

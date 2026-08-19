@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/admin-env.sh
+
+if [ "${2:-}" = "" ]; then
+	echo "Usage: ss-revoke-access <userId> <vaultId>" >&2
+	exit 1
+fi
+
+curl -sf -X DELETE "$ADMIN_BASE/vaults/$2/access/$1" -H "$ADMIN_AUTH"
+echo "revoked (idempotent - also succeeds if the user had no access)."

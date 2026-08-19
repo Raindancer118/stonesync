@@ -53,6 +53,21 @@ public class AdminController {
         adminService.grantAccess(request.userId(), vaultId, request.role());
     }
 
+    @DeleteMapping("/vaults/{vaultId}/access/{userId}")
+    public void revokeAccess(@PathVariable UUID vaultId, @PathVariable UUID userId) {
+        adminService.revokeAccess(userId, vaultId);
+    }
+
+    @DeleteMapping("/vaults/{vaultId}")
+    public void deleteVault(@PathVariable UUID vaultId) {
+        adminService.deleteVault(vaultId);
+    }
+
+    @DeleteMapping("/users/{userId}")
+    public void deleteUser(@PathVariable UUID userId) {
+        adminService.deleteUser(userId);
+    }
+
     @PostMapping("/users/{userId}/api-keys")
     public ApiKeyResponse createApiKey(@PathVariable UUID userId, @RequestBody CreateApiKeyRequest request) {
         String rawKey = adminService.createApiKey(userId, request.deviceName());

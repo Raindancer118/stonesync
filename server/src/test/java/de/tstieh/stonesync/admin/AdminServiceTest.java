@@ -3,6 +3,8 @@ package de.tstieh.stonesync.admin;
 import de.tstieh.stonesync.auth.ApiKeyEntity;
 import de.tstieh.stonesync.auth.ApiKeyHasher;
 import de.tstieh.stonesync.auth.ApiKeyRepository;
+import de.tstieh.stonesync.sync.DocumentEntity;
+import de.tstieh.stonesync.sync.DocumentRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,11 +16,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -33,6 +38,8 @@ class AdminServiceTest {
     private UserVaultAccessRepository accessRepository;
     @Mock
     private ApiKeyRepository apiKeyRepository;
+    @Mock
+    private DocumentRepository documentRepository;
 
     private final ApiKeyHasher hasher = new ApiKeyHasher();
     private AdminService service;
@@ -41,7 +48,8 @@ class AdminServiceTest {
     @BeforeEach
     void setUp() {
         Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
-        service = new AdminService(userRepository, vaultRepository, accessRepository, apiKeyRepository, hasher, clock);
+        service = new AdminService(userRepository, vaultRepository, accessRepository, apiKeyRepository,
+                documentRepository, hasher, clock);
     }
 
     @Test
@@ -76,5 +84,81 @@ class AdminServiceTest {
         service.grantAccess(userId, vaultId, VaultRole.EDITOR);
 
         verify(accessRepository).save(any(UserVaultAccessEntity.class));
+    }
+
+    @Test
+    @DisplayName("deleting a vault with existing documents is rejected, to prevent losing synced content")
+    void deleteVaultWithDocumentsIsRejected() {
+        UUID vaultId = UUID.randomUUID();
+        when(documentRepository.findByVaultId(vaultId)).thenReturn(List.of(
+                new DocumentEntity(UUID.randomUUID(), vaultId, "note.md", DocumentEntity.ContentType.TEXT, Instant.now())));
+
+        assertThatThrownBy(() -> service.deleteVault(vaultId)).isInstanceOf(VaultNotEmptyException.class);
+
+        verify(vaultRepository, never()).deleteById(any());
+    }
+
+    @Test
+    @DisplayName("deleting an empty vault removes its access grants and the vault itself")
+    void deleteEmptyVaultRemovesAccessGrantsAndVault() {
+        UUID vaultId = UUID.randomUUID();
+        when(documentRepository.findByVaultId(vaultId)).thenReturn(List.of());
+        UserVaultAccessEntity access = new UserVaultAccessEntity(UUID.randomUUID(), userId, vaultId, VaultRole.OWNER);
+        when(accessRepository.findByVaultId(vaultId)).thenReturn(List.of(access));
+
+        service.deleteVault(vaultId);
+
+        verify(accessRepository).deleteAll(List.of(access));
+        verify(vaultRepository).deleteById(vaultId);
+    }
+
+    @Test
+    @DisplayName("deleting a user who still owns vaults is rejected, to avoid orphaning them")
+    void deleteUserWhoOwnsVaultsIsRejected() {
+        when(vaultRepository.findByOwnerId(userId)).thenReturn(List.of(
+                new VaultEntity(UUID.randomUUID(), "My Vault", userId, Instant.now())));
+
+        assertThatThrownBy(() -> service.deleteUser(userId)).isInstanceOf(UserOwnsVaultsException.class);
+
+        verify(userRepository, never()).deleteById(any());
+    }
+
+    @Test
+    @DisplayName("deleting a user with no owned vaults removes their API keys, access grants and the user")
+    void deleteUserRemovesApiKeysAccessGrantsAndUser() {
+        when(vaultRepository.findByOwnerId(userId)).thenReturn(List.of());
+        ApiKeyEntity key = new ApiKeyEntity(UUID.randomUUID(), userId, "dev", "hash", Instant.now());
+        when(apiKeyRepository.findByUserId(userId)).thenReturn(List.of(key));
+        UserVaultAccessEntity access = new UserVaultAccessEntity(UUID.randomUUID(), userId, UUID.randomUUID(), VaultRole.EDITOR);
+        when(accessRepository.findByUserId(userId)).thenReturn(List.of(access));
+
+        service.deleteUser(userId);
+
+        verify(apiKeyRepository).deleteAll(List.of(key));
+        verify(accessRepository).deleteAll(List.of(access));
+        verify(userRepository).deleteById(userId);
+    }
+
+    @Test
+    @DisplayName("revoking access for a user/vault pair that has no grant is a no-op, not an error (idempotent DELETE)")
+    void revokeAccessIsIdempotentWhenNoGrantExists() {
+        UUID vaultId = UUID.randomUUID();
+        when(accessRepository.findByUserIdAndVaultId(userId, vaultId)).thenReturn(Optional.empty());
+
+        service.revokeAccess(userId, vaultId);
+
+        verify(accessRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("revoking an existing access grant removes it")
+    void revokeAccessRemovesExistingGrant() {
+        UUID vaultId = UUID.randomUUID();
+        UserVaultAccessEntity access = new UserVaultAccessEntity(UUID.randomUUID(), userId, vaultId, VaultRole.VIEWER);
+        when(accessRepository.findByUserIdAndVaultId(userId, vaultId)).thenReturn(Optional.of(access));
+
+        service.revokeAccess(userId, vaultId);
+
+        verify(accessRepository).delete(access);
     }
 }

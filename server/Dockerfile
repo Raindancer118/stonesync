@@ -8,16 +8,21 @@ RUN mvn -q -B package -DskipTests
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 
-# curl (health/status checks) + psql (ad-hoc DB inspection) for the console
-# scripts below - both are read-only diagnostic tools, not app dependencies.
+# curl (admin API + health calls) + psql (ad-hoc DB inspection) + jq (formatting
+# admin API responses) for the console scripts below - diagnostic/ops tooling,
+# not app dependencies.
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends curl postgresql-client \
+	&& apt-get install -y --no-install-recommends curl postgresql-client jq \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /build/target/stonesync-server.jar app.jar
-COPY console/pg-env.sh /usr/local/bin/pg-env.sh
-COPY console/help console/ss-status console/ss-vaults console/ss-docs console/ss-updates console/ss-attachments console/ss-users console/ss-apikeys /usr/local/bin/
-RUN chmod +x /usr/local/bin/pg-env.sh /usr/local/bin/help /usr/local/bin/ss-*
+COPY console/pg-env.sh console/admin-env.sh /usr/local/bin/
+COPY console/help \
+     console/ss-status console/ss-vaults console/ss-docs console/ss-updates console/ss-attachments console/ss-users console/ss-apikeys \
+     console/ss-create-user console/ss-delete-user console/ss-create-vault console/ss-delete-vault \
+     console/ss-grant-access console/ss-revoke-access console/ss-create-apikey console/ss-revoke-apikey \
+     /usr/local/bin/
+RUN chmod +x /usr/local/bin/pg-env.sh /usr/local/bin/admin-env.sh /usr/local/bin/help /usr/local/bin/ss-*
 
 VOLUME ["/data/vault"]
 EXPOSE 8080

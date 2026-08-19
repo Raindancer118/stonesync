@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/admin-env.sh
+
+if [ "${1:-}" = "" ]; then
+	echo "Usage: ss-delete-vault <vaultId>" >&2
+	exit 1
+fi
+
+# Server rejects this (409) if the vault still has documents - run ss-docs "$1"
+# first to check. This is intentional: nothing here cascades away synced content.
+http_code=$(curl -s -o /tmp/ss-delete-vault.out -w "%{http_code}" -X DELETE "$ADMIN_BASE/vaults/$1" -H "$ADMIN_AUTH")
+if [ "$http_code" = "409" ]; then
+	echo "Refused: this vault still has documents. Run 'ss-docs $1' to see them." >&2
+	exit 1
+elif [ "$http_code" -ge 300 ]; then
+	echo "Failed (HTTP $http_code):" >&2
+	cat /tmp/ss-delete-vault.out >&2
+	exit 1
+fi
+echo "vault $1 deleted."

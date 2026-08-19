@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/admin-env.sh
+
+if [ "${1:-}" = "" ]; then
+	echo "Usage: ss-revoke-apikey <apiKeyId>" >&2
+	echo "(run ss-apikeys <userId> first to find the id)" >&2
+	exit 1
+fi
+
+curl -sf -X DELETE "$ADMIN_BASE/api-keys/$1" -H "$ADMIN_AUTH"
+echo "revoked."

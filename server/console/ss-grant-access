@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/admin-env.sh
+
+if [ "${3:-}" = "" ]; then
+	echo "Usage: ss-grant-access <userId> <vaultId> <OWNER|EDITOR|VIEWER>" >&2
+	exit 1
+fi
+
+curl -sf -X POST "$ADMIN_BASE/vaults/$2/access" \
+	-H "$ADMIN_AUTH" -H "Content-Type: application/json" \
+	-d "{\"userId\":\"$1\",\"role\":\"$3\"}"
+echo "granted."

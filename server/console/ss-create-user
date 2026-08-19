@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/admin-env.sh
+
+if [ "${1:-}" = "" ]; then
+	echo "Usage: ss-create-user <email>" >&2
+	exit 1
+fi
+
+# passwordHash is a required field but unused for anything - auth is API-key-only
+# (see BootstrapService). A random placeholder is stored, never a real credential.
+placeholder_hash=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+
+curl -sf -X POST "$ADMIN_BASE/users" \
+	-H "$ADMIN_AUTH" -H "Content-Type: application/json" \
+	-d "{\"email\":\"$1\",\"passwordHash\":\"$placeholder_hash\"}" | jq .

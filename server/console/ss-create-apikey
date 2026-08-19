@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/admin-env.sh
+
+if [ "${2:-}" = "" ]; then
+	echo "Usage: ss-create-apikey <userId> <deviceName>" >&2
+	exit 1
+fi
+
+echo "Raw key is shown once and only stored hashed - save it now (e.g. into the plugin's server settings):"
+curl -sf -X POST "$ADMIN_BASE/users/$1/api-keys" \
+	-H "$ADMIN_AUTH" -H "Content-Type: application/json" \
+	-d "{\"deviceName\":\"$2\"}" | jq .
