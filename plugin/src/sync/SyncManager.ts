@@ -6,6 +6,7 @@ import { deleteDocument } from "./DocumentDeleteClient";
 import { syncCompartment, buildCollabExtension, emptyExtension } from "../editor/syncExtension";
 import type { StoneSyncSettings } from "../settings/StoneSyncSettings";
 import { isConfigured } from "../settings/StoneSyncSettings";
+import type { ConnectionStatus } from "../net/StoneSyncSocket";
 
 /** Obsidian exposes the underlying CM6 EditorView as `editor.cm` (unofficial but stable API). */
 interface EditorWithCm {
@@ -21,6 +22,7 @@ export class SyncManager {
 	private resolver: DocumentIdResolver | null = null;
 	private currentBoundPath: string | null = null;
 	private shownUnauthorizedNotice = false;
+	private statusListener: ((status: ConnectionStatus | null) => void) | null = null;
 
 	constructor(
 		private readonly app: App,
@@ -28,6 +30,16 @@ export class SyncManager {
 		private readonly userName: string,
 		private readonly userColor: string
 	) {}
+
+	/**
+	 * Registers a callback for the connection status of whichever file is currently bound (the
+	 * one and only actively-syncing session, see `bindActiveEditor`) - `null` means no file is
+	 * currently bound. Used to drive a UI indicator (e.g. a status bar item); at most one
+	 * listener is supported, matching the single-consumer (the plugin's own status bar) use case.
+	 */
+	setStatusListener(listener: ((status: ConnectionStatus | null) => void) | null): void {
+		this.statusListener = listener;
+	}
 
 	/** Call after settings changes (server URL, API key, vault ID). */
 	reconfigure(): void {
@@ -118,6 +130,7 @@ export class SyncManager {
 
 		stillCm.dispatch({ effects: syncCompartment.reconfigure(buildCollabExtension(session)) });
 		this.currentBoundPath = file.path;
+		this.statusListener?.(session.getStatus());
 
 		await session.connect();
 	}
@@ -143,6 +156,7 @@ export class SyncManager {
 			this.sessions.delete(this.currentBoundPath);
 		}
 		this.currentBoundPath = null;
+		this.statusListener?.(null);
 	}
 
 	private async getOrCreateSession(file: TFile): Promise<DocumentSession> {
@@ -166,6 +180,9 @@ export class SyncManager {
 						"StoneSync: The API key was rejected by the server (invalid or revoked). " +
 							"Please check it in settings. Sync has been stopped."
 					);
+				}
+				if (this.currentBoundPath === file.path) {
+					this.statusListener?.(status);
 				}
 			},
 			onRestoreContent: () => {

@@ -1,7 +1,8 @@
-import { Notice, Plugin, TFile, type TAbstractFile } from "obsidian";
+import { Menu, Notice, Plugin, TFile, type TAbstractFile } from "obsidian";
 import { DEFAULT_SETTINGS, type StoneSyncSettings } from "./settings/StoneSyncSettings";
 import { StoneSyncSettingTab } from "./settings/StoneSyncSettingTab";
 import { SyncManager } from "./sync/SyncManager";
+import type { ConnectionStatus } from "./net/StoneSyncSocket";
 import { AttachmentSync } from "./attachments/AttachmentSync";
 import { VaultDownloadService } from "./sync/VaultDownloadService";
 import { VaultUploadService } from "./sync/VaultUploadService";
@@ -28,9 +29,36 @@ function pickUserColor(seed: string): string {
 	return CURSOR_COLORS[hash % CURSOR_COLORS.length];
 }
 
+/** `app.setting` is Obsidian's internal settings-panel API - stable in practice, but not part of the public typings. */
+interface AppWithSettings {
+	setting: {
+		open(): void;
+		openTabById(id: string): void;
+	};
+}
+
+function describeStatus(status: ConnectionStatus | null): { label: string; cssClass: string } {
+	switch (status) {
+		case null:
+		case "idle":
+			return { label: "idle", cssClass: "idle" };
+		case "connecting":
+			return { label: "connecting…", cssClass: "connecting" };
+		case "connected":
+			return { label: "connected", cssClass: "connected" };
+		case "reconnecting":
+			return { label: "reconnecting…", cssClass: "connecting" };
+		case "closed":
+			return { label: "disconnected", cssClass: "disconnected" };
+		case "unauthorized":
+			return { label: "unauthorized", cssClass: "error" };
+	}
+}
+
 export default class StoneSyncPlugin extends Plugin {
 	settings: StoneSyncSettings = DEFAULT_SETTINGS;
 	private syncManager: SyncManager | null = null;
+	private statusBarItemEl: HTMLElement | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -45,6 +73,17 @@ export default class StoneSyncPlugin extends Plugin {
 		this.registerEditorExtension(createSyncExtension());
 
 		this.addSettingTab(new StoneSyncSettingTab(this.app, this));
+
+		// Status bar indicator for the currently-active file's live sync connection, and a
+		// one-click menu for the commands that would otherwise only be reachable via the
+		// command palette (Sync now, bulk download/upload).
+		this.statusBarItemEl = this.addStatusBarItem();
+		this.statusBarItemEl.addClass("stonesync-status-bar-item");
+		this.updateStatusBar(null);
+		this.statusBarItemEl.onClickEvent((evt) => this.showActionsMenu(evt));
+		this.syncManager.setStatusListener((status) => this.updateStatusBar(status));
+
+		this.addRibbonIcon("refresh-cw", "StoneSync actions", (evt) => this.showActionsMenu(evt));
 
 		// Entry point for the collaborator-invite flow (see AuthentikLoginSuccessHandler /
 		// DeepLinkBuilder on the server): after a colleague logs in via Authentik, the browser
@@ -105,7 +144,50 @@ export default class StoneSyncPlugin extends Plugin {
 	}
 
 	onunload(): void {
+		this.syncManager?.setStatusListener(null);
 		this.syncManager?.teardownAll();
+	}
+
+	private updateStatusBar(status: ConnectionStatus | null): void {
+		if (!this.statusBarItemEl) return;
+		const { label, cssClass } = describeStatus(status);
+		this.statusBarItemEl.empty();
+		this.statusBarItemEl.createSpan({ cls: `stonesync-status-dot stonesync-status-dot--${cssClass}` });
+		this.statusBarItemEl.createSpan({ text: `StoneSync: ${label}`, cls: "stonesync-status-text" });
+	}
+
+	private showActionsMenu(evt: MouseEvent): void {
+		const menu = new Menu();
+		menu.addItem((item) =>
+			item
+				.setTitle("Sync now")
+				.setIcon("refresh-cw")
+				.onClick(() => void this.syncManager?.syncNow())
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Download entire vault from server")
+				.setIcon("download")
+				.onClick(() => void this.downloadEntireVault())
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Upload entire vault to server")
+				.setIcon("upload")
+				.onClick(() => void this.uploadEntireVault())
+		);
+		menu.addSeparator();
+		menu.addItem((item) =>
+			item
+				.setTitle("Open StoneSync settings")
+				.setIcon("settings")
+				.onClick(() => {
+					const appWithSettings = this.app as unknown as AppWithSettings;
+					appWithSettings.setting.open();
+					appWithSettings.setting.openTabById(this.manifest.id);
+				})
+		);
+		menu.showAtMouseEvent(evt);
 	}
 
 	async loadSettings(): Promise<void> {

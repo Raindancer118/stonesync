@@ -1,0 +1,34 @@
+.stonesync-status-bar-item {
+	display: flex;
+	align-items: center;
+	gap: 0.35em;
+	cursor: pointer;
+}
+
+.stonesync-status-dot {
+	display: inline-block;
+	width: 0.6em;
+	height: 0.6em;
+	border-radius: 50%;
+	background-color: var(--text-faint);
+}
+
+.stonesync-status-dot--idle {
+	background-color: var(--text-faint);
+}
+
+.stonesync-status-dot--connecting {
+	background-color: var(--color-yellow, #e0af02);
+}
+
+.stonesync-status-dot--connected {
+	background-color: var(--color-green, #08b94e);
+}
+
+.stonesync-status-dot--disconnected {
+	background-color: var(--text-faint);
+}
+
+.stonesync-status-dot--error {
+	background-color: var(--color-red, #e93147);
+}
