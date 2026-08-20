@@ -24,6 +24,13 @@ public class VaultEntity {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    /**
+     * Namespace used to link into this vault from another one ({@code [[sales:Note]]}). Optional:
+     * a vault without a slug simply cannot be linked to from outside, which is the safe default.
+     */
+    @Column
+    private String slug;
+
     protected VaultEntity() {
         // JPA
     }
@@ -49,5 +56,13 @@ public class VaultEntity {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getSlug() {
+        return slug;
+    }
+
+    public void changeSlug(String slug) {
+        this.slug = slug;
     }
 }

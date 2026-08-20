@@ -25,6 +25,7 @@ COPY console/help \
      console/ss-git-log console/ss-vault-restore \
      console/ss-access console/ss-rule-set console/ss-rule-rm console/ss-audit \
      console/ss-file-history console/ss-make-admin \
+     console/ss-vault-slug console/ss-links \
      /usr/local/bin/
 RUN chmod +x /usr/local/bin/pg-env.sh /usr/local/bin/admin-env.sh /usr/local/bin/api-env.sh /usr/local/bin/help /usr/local/bin/ss-*
 

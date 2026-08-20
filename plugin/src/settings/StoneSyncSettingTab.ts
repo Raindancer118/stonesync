@@ -1,9 +1,33 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type StoneSyncPlugin from "../main";
 
 export class StoneSyncSettingTab extends PluginSettingTab {
 	constructor(app: App, private readonly plugin: StoneSyncPlugin) {
 		super(app, plugin);
+	}
+
+	/** Reads the namespace from the server; silently leaves the field empty if we may not see it. */
+	private async loadSlug(text: { setValue: (value: string) => unknown }): Promise<void> {
+		try {
+			const client = this.plugin.permissionsClientOrNull();
+			if (!client) return;
+			const { slug } = await client.slug();
+			text.setValue(slug ?? "");
+		} catch (error) {
+			console.debug("[StoneSync] Could not read the vault namespace", error);
+		}
+	}
+
+	private async saveSlug(value: string): Promise<void> {
+		const client = this.plugin.permissionsClientOrNull();
+		if (!client) return;
+		try {
+			await client.setSlug(value.trim() === "" ? null : value.trim());
+			new Notice("StoneSync: Vault namespace saved.");
+		} catch (error) {
+			console.error("[StoneSync] Failed to save the vault namespace", error);
+			new Notice("StoneSync: Could not save the namespace - only an owner may change it, and it must be lowercase letters, digits or dashes.");
+		}
 	}
 
 	display(): void {
@@ -78,6 +102,36 @@ export class StoneSyncSettingTab extends PluginSettingTab {
 					this.plugin.settings.syncEnabled = value;
 					await this.plugin.saveSettings();
 				})
+			);
+
+		new Setting(containerEl)
+			.setName("Vault link namespace")
+			.setDesc(
+				"Lets other vaults link into this one as [[namespace:Note]]. Lowercase letters, " +
+					"digits and dashes. Only a vault owner can change it; leave empty to make this " +
+					"vault unlinkable from outside."
+			)
+			.addText((text) => {
+				text.setPlaceholder("e.g. sales");
+				void this.loadSlug(text);
+				text.onChange(() => undefined);
+				text.inputEl.onblur = () => void this.saveSlug(text.getValue());
+			});
+
+		new Setting(containerEl)
+			.setName("Shared notes folder")
+			.setDesc(
+				"Where notes from other vaults are placed when you follow a cross-vault link. " +
+					"They become ordinary notes here, so they keep working offline."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("_shared")
+					.setValue(this.plugin.settings.mirrorFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.mirrorFolder = value.trim() || "_shared";
+						await this.plugin.saveSettings();
+					})
 			);
 
 		new Setting(containerEl)

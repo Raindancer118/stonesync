@@ -30,17 +30,20 @@ public class DocumentService {
     private final DocumentGitEraser gitEraser;
     private final VaultEventBroadcaster vaultEventBroadcaster;
     private final AuditService auditService;
+    private final CrossVaultLinkMaintainer linkMaintainer;
     private final Clock clock;
 
     public DocumentService(DocumentRepository repository, VaultAccessService vaultAccessService,
                             DocumentDeletionBroadcaster deletionBroadcaster, DocumentGitEraser gitEraser,
-                            VaultEventBroadcaster vaultEventBroadcaster, AuditService auditService, Clock clock) {
+                            VaultEventBroadcaster vaultEventBroadcaster, AuditService auditService,
+                            CrossVaultLinkMaintainer linkMaintainer, Clock clock) {
         this.repository = repository;
         this.vaultAccessService = vaultAccessService;
         this.deletionBroadcaster = deletionBroadcaster;
         this.gitEraser = gitEraser;
         this.vaultEventBroadcaster = vaultEventBroadcaster;
         this.auditService = auditService;
+        this.linkMaintainer = linkMaintainer;
         this.clock = clock;
     }
 
@@ -57,6 +60,9 @@ public class DocumentService {
         repository.save(document);
         auditService.record(AuditEventType.DOCUMENT_RENAMED, userId, document.getVaultId(), documentId, newPath, null,
                 "from '" + oldPath + "' to '" + newPath + "'");
+        // Cross-vault links elsewhere still spell the old path; queue their repair. Links inside
+        // this vault are Obsidian's own job and are deliberately left alone.
+        linkMaintainer.onDocumentRenamed(documentId, document.getVaultId(), oldPath, newPath);
         AppLog.info("Renamed document {} from '{}' to '{}'", documentId, oldPath, newPath);
     }
 

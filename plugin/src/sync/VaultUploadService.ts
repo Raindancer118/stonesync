@@ -12,6 +12,8 @@ export interface VaultUploadOptions {
 	userColor: string;
 	/** Fired after every file is processed - drives UI other than the periodic Notice (e.g. the status bar). */
 	onProgress?: (processed: number, total: number) => void;
+	/** Notes mirrored from another vault - they belong there, not here (see `MirrorRegistry`). */
+	isMirroredPath?: (path: string) => boolean;
 }
 
 /**
@@ -42,8 +44,13 @@ export class VaultUploadService {
 			return;
 		}
 
-		const markdownFiles = app.vault.getMarkdownFiles();
-		const attachmentFiles = app.vault.getFiles().filter((file) => file.extension !== "md");
+		// Mirrors of notes from other vaults live in this vault as ordinary files, but they belong
+		// to their own vault - uploading them here would create a second, diverging copy.
+		const isMirror = (path: string) => this.options.isMirroredPath?.(path) ?? false;
+		const markdownFiles = app.vault.getMarkdownFiles().filter((file) => !isMirror(file.path));
+		const attachmentFiles = app.vault
+			.getFiles()
+			.filter((file) => file.extension !== "md" && !isMirror(file.path));
 		const total = markdownFiles.length + attachmentFiles.length;
 
 		let uploaded = 0;

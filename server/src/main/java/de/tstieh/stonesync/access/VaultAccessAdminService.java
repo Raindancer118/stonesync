@@ -42,6 +42,7 @@ public class VaultAccessAdminService {
     private final UserRepository userRepository;
     private final DocumentService documentService;
     private final AdminService adminService;
+    private final de.tstieh.stonesync.admin.VaultRepository vaultRepository;
     private final AuditService auditService;
     private final VaultEventBroadcaster vaultEventBroadcaster;
     private final Clock clock;
@@ -49,6 +50,7 @@ public class VaultAccessAdminService {
     public VaultAccessAdminService(VaultAccessService vaultAccessService, UserVaultAccessRepository accessRepository,
                                     VaultPathRuleRepository pathRuleRepository, UserRepository userRepository,
                                     DocumentService documentService, AdminService adminService,
+                                    de.tstieh.stonesync.admin.VaultRepository vaultRepository,
                                     AuditService auditService, VaultEventBroadcaster vaultEventBroadcaster,
                                     Clock clock) {
         this.vaultAccessService = vaultAccessService;
@@ -57,6 +59,7 @@ public class VaultAccessAdminService {
         this.userRepository = userRepository;
         this.documentService = documentService;
         this.adminService = adminService;
+        this.vaultRepository = vaultRepository;
         this.auditService = auditService;
         this.vaultEventBroadcaster = vaultEventBroadcaster;
         this.clock = clock;
@@ -140,6 +143,30 @@ public class VaultAccessAdminService {
             AppLog.info("Removed path rule '{}' in vault {}", rule.getPathPrefix(), vaultId);
             return null;
         });
+    }
+
+    /**
+     * Sets the vault's link namespace ({@code [[slug:Note]]}). Lowercase letters, digits and
+     * dashes only, so a namespace can never be confused with a path or an Obsidian heading link.
+     */
+    @Transactional
+    public String setSlug(UUID actorId, UUID vaultId, String slug) {
+        vaultAccessService.requireVaultPermission(actorId, vaultId, Permission.MANAGE_VAULT);
+        String normalized = slug == null ? null : slug.trim().toLowerCase();
+        if (normalized != null && !normalized.matches("[a-z0-9][a-z0-9-]{0,62}")) {
+            throw new IllegalArgumentException("A vault namespace may only contain lowercase letters, digits and dashes");
+        }
+        de.tstieh.stonesync.admin.VaultEntity vault = vaultRepository.findById(vaultId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown vault " + vaultId));
+        vault.changeSlug(normalized);
+        vaultRepository.save(vault);
+        AppLog.info("Vault {} link namespace set to '{}'", vaultId, normalized);
+        return normalized;
+    }
+
+    public String slugOf(UUID actorId, UUID vaultId) {
+        vaultAccessService.requireVaultPermission(actorId, vaultId, Permission.READ);
+        return vaultRepository.findById(vaultId).map(de.tstieh.stonesync.admin.VaultEntity::getSlug).orElse(null);
     }
 
     /** What the calling user themselves may do in this vault - the plugin's read-only switch. */

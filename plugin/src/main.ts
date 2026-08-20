@@ -14,6 +14,10 @@ import { canManage, type AccessLevel, type VaultPermissions } from "./access/per
 import { MembersModal } from "./ui/MembersModal";
 import { HistoryModal } from "./ui/HistoryModal";
 import { DocumentIdResolver } from "./sync/DocumentIdResolver";
+import { MirrorRegistry } from "./links/MirrorRegistry";
+import { CrossVaultLinkOpener } from "./links/CrossVaultLinkOpener";
+import { CrossVaultLinkRenderer } from "./links/CrossVaultLinkRenderer";
+import { findCrossVaultLinks, parseCrossVaultLink } from "./links/crossVaultLinks";
 import { exchangeCode } from "./onboarding/ApiKeyExchangeClient";
 
 const CURSOR_COLORS = [
@@ -70,6 +74,8 @@ export default class StoneSyncPlugin extends Plugin {
 	private lastPeers: Peer[] = [];
 	private lastLevel: AccessLevel | null = null;
 	private lastPermissions: VaultPermissions | null = null;
+	private mirrors: MirrorRegistry | null = null;
+	private linkOpener: CrossVaultLinkOpener | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -79,10 +85,31 @@ export default class StoneSyncPlugin extends Plugin {
 		}
 
 		const userName = this.settings.displayName;
-		this.syncManager = new SyncManager(this.app, () => this.settings, userName, pickUserColor(userName));
+		this.mirrors = new MirrorRegistry(() => this.settings, () => this.saveData(this.settings));
+		this.syncManager = new SyncManager(this.app, () => this.settings, userName, pickUserColor(userName), this.mirrors);
+		this.linkOpener = new CrossVaultLinkOpener({
+			app: this.app,
+			getSettings: () => this.settings,
+			mirrors: this.mirrors,
+			userName,
+			userColor: pickUserColor(userName),
+			onMirrorCreated: async () => {
+				await this.syncManager?.onActiveLeafChange();
+			},
+		});
 		this.vaultEventsManager = new VaultEventsManager(this.app, () => this.settings, userName, pickUserColor(userName),
-			() => this.syncManager?.applyPermissionChange() ?? Promise.resolve());
+			() => this.syncManager?.applyPermissionChange() ?? Promise.resolve(),
+			(documentId) => this.syncManager?.applyLinkRewriteEvent(documentId) ?? Promise.resolve());
 		this.vaultEventsManager.start();
+
+		// Cross-vault links: Obsidian renders [[slug:Note]] as an unresolved link because the
+		// target is not in this vault. Only those are replaced with a clickable element - every
+		// ordinary link stays exactly as Obsidian rendered it, and keeps working with no server.
+		const renderer = new CrossVaultLinkRenderer(this.app, (link) => void this.linkOpener?.open(link));
+		this.registerMarkdownPostProcessor(renderer.process);
+
+		// In the editor, Obsidian handles clicks itself, so the link is intercepted at the source.
+		this.registerDomEvent(document, "click", (event) => this.interceptCrossVaultClick(event), { capture: true });
 
 		this.registerEditorExtension(createSyncExtension());
 		// Editors that already exist when the plugin loads (Obsidian restores the previous
@@ -119,6 +146,20 @@ export default class StoneSyncPlugin extends Plugin {
 			name: "Sync now",
 			callback: () => {
 				void this.syncManager?.syncNow();
+			},
+		});
+
+		this.addCommand({
+			id: "stonesync-open-cross-vault-link",
+			name: "Follow the cross-vault link under the cursor",
+			editorCallback: (editor) => {
+				const line = editor.getLine(editor.getCursor().line);
+				const [link] = findCrossVaultLinks(line);
+				if (!link) {
+					new Notice("StoneSync: No cross-vault link on this line.");
+					return;
+				}
+				void this.linkOpener?.open(link);
 			},
 		});
 
@@ -175,6 +216,12 @@ export default class StoneSyncPlugin extends Plugin {
 
 		this.registerEvent(
 			this.app.vault.on("delete", (file: TAbstractFile) => {
+				// Deleting a mirror only removes the local copy - the note itself lives in another
+				// vault and must not be tombstoned there.
+				if (this.mirrors?.isMirror(file.path)) {
+					void this.mirrors.forget(file.path);
+					return;
+				}
 				void this.syncManager?.handleDelete(file.path);
 			})
 		);
@@ -200,6 +247,25 @@ export default class StoneSyncPlugin extends Plugin {
 	}
 
 	/** The caller's own role, so "why can't I type here" is answerable at a glance. */
+	/**
+	 * Catches a click on a namespaced link before Obsidian tries (and fails) to resolve it in this
+	 * vault. Anything that is not a cross-vault link is left to Obsidian untouched.
+	 */
+	private interceptCrossVaultClick(event: MouseEvent): void {
+		const target = event.target;
+		if (!(target instanceof HTMLElement)) return;
+		const anchor = target.closest<HTMLElement>("a.internal-link, .cm-hmd-internal-link");
+		if (!anchor) return;
+
+		const href = anchor.getAttribute("data-href") ?? anchor.getAttribute("href") ?? anchor.textContent ?? "";
+		const link = parseCrossVaultLink(href.trim());
+		if (!link) return;
+
+		event.preventDefault();
+		event.stopPropagation();
+		void this.linkOpener?.open(link);
+	}
+
 	private updatePermissions(permissions: VaultPermissions, level: AccessLevel | null): void {
 		this.lastPermissions = permissions;
 		this.lastLevel = level;
@@ -296,6 +362,12 @@ export default class StoneSyncPlugin extends Plugin {
 				})
 		);
 		menu.showAtMouseEvent(evt);
+	}
+
+	/** Same as `permissionsClient()`, but quiet - for background/UI lookups that may simply skip. */
+	permissionsClientOrNull(): PermissionsClient | null {
+		if (!this.settings.serverUrl || !this.settings.apiKey || !this.settings.vaultId) return null;
+		return new PermissionsClient(this.settings.serverUrl, this.settings.apiKey, this.settings.vaultId);
 	}
 
 	private permissionsClient(): PermissionsClient | null {
@@ -414,6 +486,7 @@ export default class StoneSyncPlugin extends Plugin {
 			userName: this.settings.displayName,
 			userColor: pickUserColor(this.settings.displayName),
 			onProgress: (processed, total) => this.setStatusBarBusy(`uploading ${processed}/${total}`),
+			isMirroredPath: (path) => this.mirrors?.isInMirrorFolder(path) ?? false,
 		});
 		try {
 			await service.uploadEntireVault();

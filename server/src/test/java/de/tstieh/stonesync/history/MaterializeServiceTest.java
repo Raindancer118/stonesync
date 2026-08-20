@@ -35,6 +35,9 @@ class MaterializeServiceTest {
     @org.mockito.Mock
     private de.tstieh.stonesync.audit.AuditService auditService;
 
+    @org.mockito.Mock
+    private de.tstieh.stonesync.links.LinkIndexService linkIndexService;
+
     private final UUID userId = UUID.randomUUID();
     private final UUID documentId = UUID.randomUUID();
     private final UUID vaultId = UUID.randomUUID();
@@ -42,7 +45,7 @@ class MaterializeServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new MaterializeService(documentService, userRepository, gitRepository, auditService,
+        service = new MaterializeService(documentService, userRepository, gitRepository, auditService, linkIndexService,
                 Clock.fixed(now, ZoneOffset.UTC));
     }
 

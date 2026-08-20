@@ -6,6 +6,9 @@ import { deleteDocument } from "./DocumentDeleteClient";
 import { syncCompartment, buildCollabExtension, emptyExtension } from "../editor/syncExtension";
 import { decideReconciliation } from "./reconcile";
 import { PermissionsClient } from "../access/PermissionsClient";
+import { LinkClient } from "../links/LinkClient";
+import { applyLinkRewrite } from "../links/linkRewrites";
+import type { MirrorRegistry } from "../links/MirrorRegistry";
 import { canWrite, canRead, effectiveLevel, UNKNOWN_PERMISSIONS, type AccessLevel, type VaultPermissions } from "../access/permissions";
 import type { StoneSyncSettings } from "../settings/StoneSyncSettings";
 import { isConfigured } from "../settings/StoneSyncSettings";
@@ -49,8 +52,22 @@ export class SyncManager {
 		private readonly app: App,
 		private getSettings: () => StoneSyncSettings,
 		private readonly userName: string,
-		private readonly userColor: string
+		private readonly userColor: string,
+		/** Notes mirrored from other vaults bind to their own document, not to a path in this vault. */
+		private readonly mirrors: MirrorRegistry | null = null
 	) {}
+
+	/**
+	 * A mirrored foreign note is governed by its own vault's permissions, which were resolved when
+	 * the link was followed - this vault's rules say nothing about it.
+	 */
+	private accessFor(path: string): { readable: boolean; writable: boolean } {
+		const mirror = this.mirrors?.get(path);
+		if (mirror) {
+			return { readable: true, writable: mirror.writable };
+		}
+		return { readable: canRead(this.permissions, path), writable: canWrite(this.permissions, path) };
+	}
 
 	/**
 	 * Registers a callback for the connection status of whichever file is currently bound (the
@@ -212,7 +229,7 @@ export class SyncManager {
 
 		for (const { file, cm } of open) {
 			if (this.boundViews.get(file.path) === cm) continue; // already bound to this very editor
-			if (!canRead(this.permissions, file.path)) {
+			if (!this.accessFor(file.path).readable) {
 				// Not ours to see: no session, no socket, no cursor - the note simply is not
 				// synchronized for this user (the server would refuse anyway).
 				continue;
@@ -228,7 +245,7 @@ export class SyncManager {
 	}
 
 	private async bindEditor(file: TFile, cm: EditorView): Promise<void> {
-		const writable = canWrite(this.permissions, file.path);
+		const writable = this.accessFor(file.path).writable;
 		const session = await this.getOrCreateSession(file, writable);
 		const localContent = await this.app.vault.read(file);
 
@@ -256,6 +273,12 @@ export class SyncManager {
 
 		cm.dispatch({ effects: syncCompartment.reconfigure(buildCollabExtension(session, !writable)) });
 		this.boundViews.set(file.path, cm);
+
+		if (writable) {
+			// A note whose cross-vault links point at renamed targets carries queued repairs; the
+			// server cannot perform them (it understands no Yjs), so whoever opens the note does.
+			void this.applyPendingLinkRewrites(session);
+		}
 	}
 
 	private editorStillShows(file: TFile, cm: EditorView): boolean {
@@ -325,7 +348,8 @@ export class SyncManager {
 		if (existing) return existing;
 
 		const settings = this.getSettings();
-		const documentId = await this.getResolver().resolve(file.path);
+		const mirror = this.mirrors?.get(file.path);
+		const documentId = mirror ? mirror.documentId : await this.getResolver().resolve(file.path);
 
 		const session = new DocumentSession({
 			documentId,
@@ -401,6 +425,7 @@ export class SyncManager {
 
 	/** On rename: move the session key + resolver cache along without reconnecting. */
 	handleRename(file: TFile, oldPath: string): void {
+		void this.mirrors?.rename(oldPath, file.path);
 		const session = this.sessions.get(oldPath);
 		if (session) {
 			this.sessions.delete(oldPath);
@@ -433,6 +458,37 @@ export class SyncManager {
 		} catch (error) {
 			console.error("[StoneSync] Failed to notify server of local delete", path, error);
 			new Notice(`StoneSync: Failed to sync deletion of "${path}" - it may reappear.`);
+		}
+	}
+
+	/**
+	 * Fetches and performs the link repairs queued for this document, then reports each one as
+	 * done. Failures are non-fatal: the instruction stays queued and is retried on the next open.
+	 */
+	async applyPendingLinkRewrites(session: DocumentSession): Promise<void> {
+		const settings = this.getSettings();
+		if (!isConfigured(settings)) return;
+		const client = new LinkClient(settings.serverUrl, settings.apiKey);
+		try {
+			for (const rewrite of await client.pendingRewrites(session.documentId)) {
+				const replacements = applyLinkRewrite(session.ytext, rewrite.oldLink, rewrite.newLink);
+				await client.markRewriteApplied(session.documentId, rewrite.id);
+				if (replacements > 0) {
+					new Notice(`StoneSync: A linked note was renamed - the link in this note was updated.`);
+				}
+			}
+		} catch (error) {
+			console.error("[StoneSync] Failed to apply queued link rewrites", error);
+		}
+	}
+
+	/** Applies one rewrite pushed live over the vault-events channel, if that note is open here. */
+	async applyLinkRewriteEvent(documentId: string): Promise<void> {
+		for (const session of this.sessions.values()) {
+			if (session.documentId === documentId) {
+				await this.applyPendingLinkRewrites(session);
+				return;
+			}
 		}
 	}
 

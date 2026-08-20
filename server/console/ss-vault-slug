@@ -1,0 +1,18 @@
+#!/bin/sh
+# Reads or sets a vault's link namespace: what other vaults write as [[namespace:Note]].
+set -eu
+. /usr/local/bin/api-env.sh
+
+if [ "${1:-}" = "" ]; then
+	echo "Usage: ss-vault-slug <vaultId> [namespace|none]" >&2
+	exit 1
+fi
+
+if [ "${2:-}" = "" ]; then
+	curl -sf "$API_BASE/vaults/$1/slug" -H "$API_AUTH" | jq -r '.slug // "(none)"'
+else
+	if [ "$2" = "none" ]; then SLUG=null; else SLUG="\"$2\""; fi
+	curl -sf -X PUT "$API_BASE/vaults/$1/slug" \
+		-H "$API_AUTH" -H "Content-Type: application/json" \
+		-d "{\"slug\":$SLUG}" | jq -r '.slug // "(none)"'
+fi

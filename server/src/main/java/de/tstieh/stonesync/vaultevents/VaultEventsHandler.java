@@ -26,7 +26,8 @@ import java.util.UUID;
  * would otherwise hit.
  */
 @Component
-public class VaultEventsHandler extends TextWebSocketHandler implements VaultEventBroadcaster {
+public class VaultEventsHandler extends TextWebSocketHandler
+        implements VaultEventBroadcaster, de.tstieh.stonesync.links.LinkRewriteNotifier {
 
     private final VaultEventsSessionRegistry registry;
     private final ObjectMapper objectMapper;
@@ -87,6 +88,13 @@ public class VaultEventsHandler extends TextWebSocketHandler implements VaultEve
             }
         }
         AppLog.info("Notified user {} that '{}' in vault {} is no longer accessible to them", userId, path, vaultId);
+    }
+
+    @Override
+    public void notifyLinkRewrite(UUID vaultId, UUID documentId, String path, long rewriteId, String oldLink,
+                                   String newLink) {
+        broadcast(vaultId, new VaultEventMessage(VaultEventMessage.TYPE_LINK_REWRITE, documentId.toString(), path,
+                null, null, rewriteId, oldLink, newLink));
     }
 
     private void broadcast(UUID vaultId, VaultEventMessage message) {

@@ -4,6 +4,7 @@ import de.tstieh.stonesync.admin.UserEntity;
 import de.tstieh.stonesync.admin.UserRepository;
 import de.tstieh.stonesync.audit.AuditEventType;
 import de.tstieh.stonesync.audit.AuditService;
+import de.tstieh.stonesync.links.LinkIndexService;
 import de.tstieh.stonesync.logging.AppLog;
 import de.tstieh.stonesync.sync.DocumentService;
 import org.springframework.stereotype.Service;
@@ -24,14 +25,17 @@ public class MaterializeService {
     private final UserRepository userRepository;
     private final VaultGitRepository gitRepository;
     private final AuditService auditService;
+    private final LinkIndexService linkIndexService;
     private final Clock clock;
 
     public MaterializeService(DocumentService documentService, UserRepository userRepository,
-                               VaultGitRepository gitRepository, AuditService auditService, Clock clock) {
+                               VaultGitRepository gitRepository, AuditService auditService,
+                               LinkIndexService linkIndexService, Clock clock) {
         this.documentService = documentService;
         this.userRepository = userRepository;
         this.gitRepository = gitRepository;
         this.auditService = auditService;
+        this.linkIndexService = linkIndexService;
         this.clock = clock;
     }
 
@@ -45,6 +49,10 @@ public class MaterializeService {
         AppLog.debug("Materializing document {} ({}) by {}", documentId, location.path(), authorEmail);
         boolean committed = gitRepository.writeAndCommitIfChanged(location.vaultId(), location.path(), content,
                 authorEmail, clock.instant());
+        // Materialize is the only place the server sees plaintext, so it is also the only place
+        // the cross-vault link index can be maintained - the Yjs path stays an opaque relay.
+        linkIndexService.reindex(documentId, location.vaultId(), content);
+
         if (committed) {
             // Only on a real change: the client re-materializes on a debounce timer, and an
             // unchanged note must not produce an audit entry any more than it produces a commit.

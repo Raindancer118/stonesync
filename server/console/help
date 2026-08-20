@@ -45,6 +45,10 @@ Permissions & audit (needs CONSOLE_API_KEY, whose account must be an ADMIN):
   ss-file-history <document> [commit]
                                     who changed a note and when; with a commit id, its diff
 
+Cross-vault links:
+  ss-vault-slug <vault> [ns|none]    read/set the vault's link namespace ([[ns:Note]])
+  ss-links <document>               who links to this note across vaults + pending link repairs
+
 Container logs are not duplicated here on purpose — use Portainer's own
 "Logs" tab for that (streams `docker logs` directly, no extra tooling
 needed for it).

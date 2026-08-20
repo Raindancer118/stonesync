@@ -1,0 +1,17 @@
+#!/bin/sh
+# Which notes link into a given note, across vault boundaries (permission-filtered).
+set -eu
+. /usr/local/bin/api-env.sh
+
+if [ "${1:-}" = "" ]; then
+	echo "Usage: ss-links <documentId>" >&2
+	exit 1
+fi
+
+echo "Notes linking here:"
+curl -sf "$API_BASE/links/backlinks/$1" -H "$API_AUTH" \
+	| jq -r '.[] | "  \(.path)\t(\(.vaultSlug // "this vault"))\t\(.linkText)"'
+echo
+echo "Pending link repairs for this note:"
+curl -sf "$API_BASE/links/rewrites/$1" -H "$API_AUTH" \
+	| jq -r 'if length == 0 then "  (none)" else .[] | "  \(.oldLink) -> \(.newLink)" end'

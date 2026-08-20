@@ -47,6 +47,8 @@ describe("isConfigured", () => {
 				vaultId: "vault-1",
 				syncEnabled: true,
 				displayName: "Tester",
+				mirrorFolder: "_shared",
+				mirrors: {},
 			})
 		).toBe(true);
 	});
@@ -59,6 +61,8 @@ describe("isConfigured", () => {
 				vaultId: "vault-1",
 				syncEnabled: true,
 				displayName: "Tester",
+				mirrorFolder: "_shared",
+				mirrors: {},
 			})
 		).toBe(false);
 	});

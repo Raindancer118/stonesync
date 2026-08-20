@@ -30,7 +30,21 @@ export interface VaultEventAccessRevoked {
 	originSessionId: string | null;
 }
 
-export type VaultEvent = VaultEventCreated | VaultEventDeleted | VaultEventAccessRevoked;
+/**
+ * A cross-vault link in one of this vault's notes points at a note that was renamed. The server
+ * states what should change; the client performs it as an ordinary edit (see `linkRewrites.ts`).
+ */
+export interface VaultEventLinkRewrite {
+	type: "link_rewrite";
+	documentId: string;
+	path: string;
+	rewriteId: number;
+	oldLink: string;
+	newLink: string;
+	originSessionId: string | null;
+}
+
+export type VaultEvent = VaultEventCreated | VaultEventDeleted | VaultEventAccessRevoked | VaultEventLinkRewrite;
 
 export interface VaultEventsSocketOptions {
 	/** e.g. "wss://stonesync.example.com" (no trailing slash). */

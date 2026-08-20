@@ -66,6 +66,18 @@ public class VaultAccessController {
         return accessAdminService.permissionsOf(userId(authentication), vaultId);
     }
 
+    /** The vault's link namespace - what other vaults write as [[slug:Note]]. */
+    @GetMapping("/slug")
+    public SlugResponse slug(@PathVariable UUID vaultId, Authentication authentication) {
+        return new SlugResponse(accessAdminService.slugOf(userId(authentication), vaultId));
+    }
+
+    @PutMapping("/slug")
+    public SlugResponse setSlug(@PathVariable UUID vaultId, @RequestBody SlugRequest request,
+                                 Authentication authentication) {
+        return new SlugResponse(accessAdminService.setSlug(userId(authentication), vaultId, request.slug()));
+    }
+
     @GetMapping("/members")
     public List<VaultAccessAdminService.Member> members(@PathVariable UUID vaultId, Authentication authentication) {
         return accessAdminService.listMembers(userId(authentication), vaultId);
@@ -139,6 +151,12 @@ public class VaultAccessController {
 
     private static UUID userId(Authentication authentication) {
         return (UUID) authentication.getPrincipal();
+    }
+
+    public record SlugRequest(String slug) {
+    }
+
+    public record SlugResponse(String slug) {
     }
 
     public record SetRoleRequest(@NotNull VaultRole role) {

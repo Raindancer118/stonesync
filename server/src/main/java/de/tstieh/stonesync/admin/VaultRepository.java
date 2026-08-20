@@ -8,4 +8,7 @@ import java.util.UUID;
 public interface VaultRepository extends JpaRepository<VaultEntity, UUID> {
 
     List<VaultEntity> findByOwnerId(UUID ownerId);
+
+    /** Lookup by the link namespace, e.g. the "sales" in [[sales:Jahresabschluss]]. */
+    java.util.Optional<VaultEntity> findBySlug(String slug);
 }

@@ -137,6 +137,28 @@ by the vault's git history, with the real author on each commit).
 Owners manage all of this from inside Obsidian (*Manage collaborators and folder rules*) or from
 the server console (`ss-access`, `ss-rule-set`, `ss-audit`, `ss-file-history`).
 
+## Linking across vaults
+
+Ordinary `[[Note]]` links are **never touched**: a StoneSync vault stays a plain Obsidian vault,
+and every local link keeps working with no server in reach. Only a namespaced link needs one:
+
+```markdown
+Siehe [[sales:Finanzen/Jahresabschluss|die Zahlen]] und [[Meine Lokale Notiz]].
+             ^ another vault's namespace                    ^ untouched, works offline
+```
+
+* **Following a link** mirrors that note into `_shared/<namespace>/…` as an ordinary note - so
+  from then on Obsidian's own links, backlinks, search and offline reading just work. It stays
+  bound to its real document on the other server-side vault, so edits (if you may make them) go
+  back to the original rather than into a copy.
+* **Permission-checked**: a link you may not follow reports `restricted`, never the target's
+  title or even whether it exists.
+* **A server-side link index** (built from materialized content, never from the CRDT stream)
+  answers "who links to this note" across vaults, filtered to what you may see.
+* **Renames repair themselves**: the server finds every note whose cross-vault link pointed at
+  the renamed note and queues the exact replacement. Clients apply it as an ordinary edit, which
+  then flows to everyone through normal sync - the server never has to understand Yjs.
+
 ## What "live" means here
 
 * Every **open** Markdown editor gets its own sync session - not just the focused pane, so a

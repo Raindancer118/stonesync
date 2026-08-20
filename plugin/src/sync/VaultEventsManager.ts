@@ -38,7 +38,9 @@ export class VaultEventsManager {
 		private readonly userName: string,
 		private readonly userColor: string,
 		/** Re-reads permissions and rebinds open editors after the server reports a change. */
-		private readonly onAccessChanged: () => Promise<void> = async () => {}
+		private readonly onAccessChanged: () => Promise<void> = async () => {},
+		/** Applies a queued cross-vault link repair to a note this client has open. */
+		private readonly onLinkRewrite: (documentId: string) => Promise<void> = async () => {}
 	) {}
 
 	start(): void {
@@ -156,6 +158,8 @@ export class VaultEventsManager {
 			// own concurrent action is recoverable from Obsidian's own trash, not just gone.
 			await this.app.vault.trash(file, true);
 			new Notice(`StoneSync: "${event.path}" was deleted by a collaborator.`);
+		} else if (event.type === "link_rewrite") {
+			await this.onLinkRewrite(event.documentId);
 		} else if (event.type === "access_revoked") {
 			// Revoking access has to actually take the content off this device - otherwise the
 			// copy that is already here stays readable forever and only stops receiving updates.

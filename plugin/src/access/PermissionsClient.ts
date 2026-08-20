@@ -61,6 +61,17 @@ export class PermissionsClient {
 		return this.request<VaultPermissions>("GET", `/api/vaults/${encodeURIComponent(this.vaultId)}/permissions`);
 	}
 
+	/** The vault's link namespace: what other vaults write as [[slug:Note]]. */
+	slug(): Promise<{ slug: string | null }> {
+		return this.request<{ slug: string | null }>("GET", `/api/vaults/${encodeURIComponent(this.vaultId)}/slug`);
+	}
+
+	setSlug(slug: string | null): Promise<{ slug: string | null }> {
+		return this.request<{ slug: string | null }>("PUT", `/api/vaults/${encodeURIComponent(this.vaultId)}/slug`, {
+			slug,
+		});
+	}
+
 	members(): Promise<Member[]> {
 		return this.request<Member[]>("GET", `/api/vaults/${encodeURIComponent(this.vaultId)}/members`);
 	}

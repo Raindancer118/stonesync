@@ -48,6 +48,9 @@ class DocumentServiceTest {
     @Mock
     private de.tstieh.stonesync.audit.AuditService auditService;
 
+    @Mock
+    private CrossVaultLinkMaintainer linkMaintainer;
+
     private DocumentService service;
     private final UUID documentId = UUID.randomUUID();
     private final UUID vaultId = UUID.randomUUID();
@@ -56,7 +59,7 @@ class DocumentServiceTest {
     @BeforeEach
     void setUp() {
         Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
-        service = new DocumentService(repository, vaultAccessService, deletionBroadcaster, gitEraser, vaultEventBroadcaster, auditService, clock);
+        service = new DocumentService(repository, vaultAccessService, deletionBroadcaster, gitEraser, vaultEventBroadcaster, auditService, linkMaintainer, clock);
         // Default for the tests that are not about permissions: everything is readable.
         lenient().when(vaultAccessService.canRead(any(), any(), anyString())).thenReturn(true);
     }
