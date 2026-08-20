@@ -39,6 +39,7 @@ jobs:
           files: |
             plugin/main.js
             plugin/manifest.json
+            plugin/styles.css
 
   server-image-build:
     name: Server Docker image (build-only, no registry push)
