@@ -168,6 +168,9 @@ export class SyncManager {
 					);
 				}
 			},
+			onRestoreContent: () => {
+				new Notice(`StoneSync: "${file.path}" was restored to an earlier version.`);
+			},
 			onDeleteNotice: () => {
 				void this.handleRemoteDeleteNotice(file.path);
 			},

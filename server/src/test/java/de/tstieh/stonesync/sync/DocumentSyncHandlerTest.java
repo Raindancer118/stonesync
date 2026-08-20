@@ -42,6 +42,8 @@ class DocumentSyncHandlerTest {
     @Mock
     private YjsUpdateRepository updateRepository;
     @Mock
+    private DocumentRestoreQueueService restoreQueueService;
+    @Mock
     private WebSocketSession sender;
     @Mock
     private WebSocketSession otherClient;
@@ -52,7 +54,7 @@ class DocumentSyncHandlerTest {
     @BeforeEach
     void setUp() throws Exception {
         handler = new DocumentSyncHandler(updateLogService, snapshotService, registry,
-                snapshotRepository, updateRepository);
+                snapshotRepository, updateRepository, restoreQueueService);
 
         Map<String, Object> attrs = new HashMap<>();
         lenient().when(sender.getUri()).thenReturn(URI.create("/ws/sync/" + documentId));
@@ -63,6 +65,7 @@ class DocumentSyncHandlerTest {
         lenient().when(otherClient.isOpen()).thenReturn(true);
         lenient().when(snapshotRepository.findById(documentId)).thenReturn(Optional.empty());
         lenient().when(updateRepository.findByDocumentIdOrderByIdAsc(documentId)).thenReturn(List.of());
+        lenient().when(restoreQueueService.consumePending(documentId)).thenReturn(Optional.empty());
     }
 
     private byte[] messageOf(int prefix, byte... payload) {
@@ -181,5 +184,46 @@ class DocumentSyncHandlerTest {
         handler.afterConnectionEstablished(sender);
 
         verify(registry).register(documentId, sender);
+    }
+
+    @Test
+    @DisplayName("a pending restore is delivered right after CAUGHT_UP on connect, and then consumed")
+    void connectingSessionReceivesPendingRestoreAfterCaughtUp() throws Exception {
+        when(restoreQueueService.consumePending(documentId)).thenReturn(Optional.of("restored content"));
+
+        handler.afterConnectionEstablished(sender);
+
+        ArgumentCaptor<BinaryMessage> captor = ArgumentCaptor.forClass(BinaryMessage.class);
+        verify(sender, times(2)).sendMessage(captor.capture());
+        List<BinaryMessage> sent = captor.getAllValues();
+        assertThat(sent.get(0).getPayload().array()).containsExactly(0x04);
+        byte[] restorePayload = sent.get(1).getPayload().array();
+        assertThat(restorePayload[0]).isEqualTo((byte) 0x05);
+        assertThat(new String(restorePayload, 1, restorePayload.length - 1, java.nio.charset.StandardCharsets.UTF_8))
+                .isEqualTo("restored content");
+    }
+
+    @Test
+    @DisplayName("broadcastOrQueueRestore sends RESTORE_CONTENT live to every open session when any is connected")
+    void broadcastOrQueueRestoreDeliversLiveWhenConnected() throws Exception {
+        doReturn(java.util.Set.of(sender, otherClient)).when(registry).sessionsFor(documentId);
+
+        handler.broadcastOrQueueRestore(documentId, "new content");
+
+        ArgumentCaptor<BinaryMessage> senderCaptor = ArgumentCaptor.forClass(BinaryMessage.class);
+        verify(sender).sendMessage(senderCaptor.capture());
+        assertThat(senderCaptor.getValue().getPayload().array()[0]).isEqualTo((byte) 0x05);
+        verify(otherClient).sendMessage(any(BinaryMessage.class));
+        verify(restoreQueueService, never()).enqueue(any(), any());
+    }
+
+    @Test
+    @DisplayName("broadcastOrQueueRestore queues instead of sending when no session is currently connected")
+    void broadcastOrQueueRestoreQueuesWhenNoneConnected() {
+        doReturn(java.util.Set.of()).when(registry).sessionsFor(documentId);
+
+        handler.broadcastOrQueueRestore(documentId, "new content");
+
+        verify(restoreQueueService).enqueue(documentId, "new content");
     }
 }

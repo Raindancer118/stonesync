@@ -3,6 +3,10 @@ import { Awareness } from "y-protocols/awareness";
 import { StoneSyncSocket, ConnectionStatus } from "../net/StoneSyncSocket";
 import { requestTicket } from "../net/TicketClient";
 import { toWebSocketBaseUrl } from "../settings/StoneSyncSettings";
+import { materializeDocument } from "./MaterializeClient";
+
+/** How long to wait after the last edit before pushing a materialize snapshot (see `scheduleMaterialize`). */
+const MATERIALIZE_DEBOUNCE_MS = 3000;
 
 export interface DocumentSessionOptions {
 	documentId: string;
@@ -14,6 +18,8 @@ export interface DocumentSessionOptions {
 	onError?: (error: unknown) => void;
 	/** See `StoneSyncSocketOptions.onCaughtUp`. */
 	onCaughtUp?: () => void;
+	/** See `StoneSyncSocketOptions.onRestoreContent`. */
+	onRestoreContent?: () => void;
 	/** See `StoneSyncSocketOptions.onDeleteNotice`. */
 	onDeleteNotice?: () => void;
 }
@@ -38,6 +44,7 @@ export class DocumentSession {
 	private readonly socket: StoneSyncSocket;
 	private connected = false;
 	private caughtUpResolvers: Array<() => void> = [];
+	private materializeTimer: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(private readonly options: DocumentSessionOptions) {
 		this.awareness.setLocalStateField("user", {
@@ -59,8 +66,27 @@ export class DocumentSession {
 				this.caughtUpResolvers = [];
 				resolvers.forEach((resolve) => resolve());
 			},
+			onRestoreContent: options.onRestoreContent,
 			onDeleteNotice: options.onDeleteNotice,
 		});
+
+		// Materialize side-channel: purely for git-backed history/durability, entirely decoupled
+		// from the Yjs sync path above - fires on every content change regardless of origin
+		// (local edit or an applied remote update), debounced so a burst of keystrokes produces
+		// one commit, not one per keystroke.
+		this.ytext.observe(() => this.scheduleMaterialize());
+	}
+
+	private scheduleMaterialize(): void {
+		if (this.materializeTimer) {
+			clearTimeout(this.materializeTimer);
+		}
+		this.materializeTimer = setTimeout(() => {
+			this.materializeTimer = null;
+			materializeDocument(this.options.serverUrl, this.options.apiKey, this.options.documentId,
+				this.ytext.toString()
+			).catch((error) => console.error("[StoneSync] Failed to materialize document", this.options.documentId, error));
+		}, MATERIALIZE_DEBOUNCE_MS);
 	}
 
 	/**
@@ -102,6 +128,10 @@ export class DocumentSession {
 	}
 
 	destroy(): void {
+		if (this.materializeTimer) {
+			clearTimeout(this.materializeTimer);
+			this.materializeTimer = null;
+		}
 		this.socket.destroy();
 		this.awareness.destroy();
 		this.doc.destroy();

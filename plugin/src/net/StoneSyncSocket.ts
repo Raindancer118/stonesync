@@ -51,6 +51,11 @@ export interface StoneSyncSocketOptions {
 	 */
 	onCaughtUp?: () => void;
 	/**
+	 * Fired after a RESTORE_CONTENT frame has been applied locally (see `handleMessage`) - purely
+	 * informational (e.g. a Notice), since the content replace itself already happened.
+	 */
+	onRestoreContent?: () => void;
+	/**
 	 * Fired when the server reports this document was deleted elsewhere. The caller is
 	 * responsible for removing the local file and tearing this session down - this class does
 	 * not do either itself, since it has no knowledge of the local filesystem.
@@ -246,10 +251,31 @@ export class StoneSyncSocket {
 			this.replyWithSnapshot();
 		} else if (decoded.type === MessageType.CaughtUp) {
 			this.options.onCaughtUp?.();
+		} else if (decoded.type === MessageType.RestoreContent) {
+			this.applyRestoreContent(decoded.payload);
 		} else if (decoded.type === MessageType.DeleteNotice) {
 			this.options.onDeleteNotice?.();
 		}
 		// SnapshotPayload is never sent back to clients by the server (client->server only).
+	}
+
+	/**
+	 * Applies a git-restore point-in-time: replaces the entire "content" Y.Text in one
+	 * transaction (the same delete-all + insert idiom `DocumentSession.seedIfEmpty` already uses
+	 * for initial content). Deliberately does NOT use `this` as the transaction origin - unlike a
+	 * remote DocUpdate, this needs to flow back out through the normal `onDocUpdate` listener as
+	 * an ordinary 0x00 frame, so the server actually persists the restore into the document's
+	 * Yjs update log (otherwise a brand new device connecting later would never see it via the
+	 * regular catch-up replay).
+	 */
+	private applyRestoreContent(payload: Uint8Array): void {
+		const content = new TextDecoder().decode(payload);
+		const ytext = this.options.doc.getText("content");
+		this.options.doc.transact(() => {
+			ytext.delete(0, ytext.length);
+			ytext.insert(0, content);
+		});
+		this.options.onRestoreContent?.();
 	}
 
 	/** Replies to a REQUEST_SNAPSHOT server message with the full document state. */

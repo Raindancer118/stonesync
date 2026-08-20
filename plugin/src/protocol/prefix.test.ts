@@ -87,6 +87,13 @@ describe("prefix protocol", () => {
 		expect(decoded.payload.length).toBe(0);
 	});
 
+	it("round-trips a RESTORE_CONTENT (0x05) frame with a UTF-8 plaintext payload", () => {
+		const payload = new TextEncoder().encode("restored content");
+		const decoded = decodeMessage(encodeMessage(MessageType.RestoreContent, payload));
+		expect(decoded.type).toBe(MessageType.RestoreContent);
+		expect(decoded.payload).toEqual(payload);
+	});
+
 	it("does not mutate the source payload buffer", () => {
 		const payload = new Uint8Array([1, 2, 3]);
 		const encoded = encodeMessage(MessageType.DocUpdate, payload);

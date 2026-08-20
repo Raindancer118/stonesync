@@ -206,4 +206,70 @@ class DocumentServiceTest {
                 new DocumentService.DocumentSummary(documentId, "notes/a.md", DocumentEntity.ContentType.TEXT),
                 new DocumentService.DocumentSummary(attachmentId, "images/pic.png", DocumentEntity.ContentType.ATTACHMENT));
     }
+
+    @Test
+    @DisplayName("locate returns the document's vault and current path")
+    void locateReturnsVaultAndPath() {
+        DocumentEntity doc = new DocumentEntity(documentId, vaultId, "notes/a.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
+        when(repository.findById(documentId)).thenReturn(Optional.of(doc));
+
+        DocumentService.DocumentLocation location = service.locate(userId, documentId);
+
+        assertThat(location.vaultId()).isEqualTo(vaultId);
+        assertThat(location.path()).isEqualTo("notes/a.md");
+    }
+
+    @Test
+    @DisplayName("locate without vault access fails (IDOR protection)")
+    void locateWithoutVaultAccessIsDenied() {
+        DocumentEntity doc = new DocumentEntity(documentId, vaultId, "notes/a.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
+        when(repository.findById(documentId)).thenReturn(Optional.of(doc));
+        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+
+        assertThatThrownBy(() -> service.locate(userId, documentId)).isInstanceOf(VaultAccessDeniedException.class);
+    }
+
+    @Test
+    @DisplayName("listNonDeletedForRestore excludes tombstoned documents, with no user access check")
+    void listNonDeletedForRestoreExcludesDeleted() {
+        DocumentEntity alive = new DocumentEntity(documentId, vaultId, "notes/a.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
+        DocumentEntity deleted = new DocumentEntity(UUID.randomUUID(), vaultId, "notes/b.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
+        deleted.markDeleted(Instant.parse("2025-12-15T00:00:00Z"));
+        when(repository.findByVaultId(vaultId)).thenReturn(List.of(alive, deleted));
+
+        List<DocumentService.DocumentSummary> result = service.listNonDeletedForRestore(vaultId);
+
+        assertThat(result).extracting(DocumentService.DocumentSummary::id).containsExactly(documentId);
+        verify(vaultAccessService, never()).requireAccess(any(), any());
+    }
+
+    @Test
+    @DisplayName("resolveOrCreateForRestore creates a new document with no user access check")
+    void resolveOrCreateForRestoreCreatesDocument() {
+        when(repository.findByVaultIdAndCurrentPath(vaultId, "notes/new.md")).thenReturn(Optional.empty());
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        UUID resolved = service.resolveOrCreateForRestore(vaultId, "notes/new.md", DocumentEntity.ContentType.TEXT);
+
+        assertThat(resolved).isNotNull();
+        verify(vaultAccessService, never()).requireAccess(any(), any());
+    }
+
+    @Test
+    @DisplayName("markDeletedForRestore tombstones the document and broadcasts a DELETE_NOTICE, with no user access check")
+    void markDeletedForRestoreTombstonesAndBroadcasts() {
+        DocumentEntity doc = new DocumentEntity(documentId, vaultId, "path.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
+        when(repository.findById(documentId)).thenReturn(Optional.of(doc));
+
+        service.markDeletedForRestore(documentId);
+
+        assertThat(doc.isDeleted()).isTrue();
+        verify(deletionBroadcaster).broadcastDeleteNotice(documentId);
+        verify(vaultAccessService, never()).requireAccess(any(), any());
+    }
 }

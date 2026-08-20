@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/admin-env.sh
+
+if [ "${2:-}" = "" ]; then
+	echo "Usage: ss-vault-restore <vaultId> <commitIsh>" >&2
+	echo "(run ss-git-log <vaultId> first to find a commit to restore to)" >&2
+	echo "WARNING: any document not present in that commit will be tombstoned - this deletes" >&2
+	echo "content for everyone. There is no confirmation prompt here; double-check the commit." >&2
+	exit 1
+fi
+
+payload=$(jq -n --arg commitIsh "$2" '{commitIsh: $commitIsh}')
+
+curl -sf -X POST "$ADMIN_BASE/vaults/$1/restore" \
+	-H "$ADMIN_AUTH" -H "Content-Type: application/json" \
+	-d "$payload" | jq .

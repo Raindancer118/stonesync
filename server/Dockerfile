@@ -22,6 +22,7 @@ COPY console/help \
      console/ss-create-user console/ss-delete-user console/ss-create-vault console/ss-delete-vault \
      console/ss-grant-access console/ss-revoke-access console/ss-create-apikey console/ss-revoke-apikey \
      console/ss-create-invite \
+     console/ss-git-log console/ss-vault-restore \
      /usr/local/bin/
 RUN chmod +x /usr/local/bin/pg-env.sh /usr/local/bin/admin-env.sh /usr/local/bin/help /usr/local/bin/ss-*
 

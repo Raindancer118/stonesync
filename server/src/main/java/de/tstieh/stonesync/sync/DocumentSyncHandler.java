@@ -10,6 +10,7 @@ import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -27,11 +28,13 @@ import java.util.UUID;
  *   <li>{@code 0x02} REQUEST_SNAPSHOT - server -&gt; client only.</li>
  *   <li>{@code 0x03} snapshot payload - client's answer to a REQUEST_SNAPSHOT, compacts the log.</li>
  *   <li>{@code 0x04} CAUGHT_UP - server -&gt; client only, see {@link #afterConnectionEstablished}.</li>
+ *   <li>{@code 0x05} RESTORE_CONTENT - server -&gt; client only, see {@link #broadcastOrQueueRestore}.</li>
  *   <li>{@code 0x06} DELETE_NOTICE - server -&gt; client only, see {@link #broadcastDeleteNotice}.</li>
  * </ul>
  */
 @Component
-public class DocumentSyncHandler extends AbstractWebSocketHandler implements DocumentDeletionBroadcaster {
+public class DocumentSyncHandler extends AbstractWebSocketHandler
+        implements DocumentDeletionBroadcaster, RestoreBroadcaster {
 
     private static final Logger log = LoggerFactory.getLogger(DocumentSyncHandler.class);
 
@@ -40,15 +43,17 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler implements Doc
     private final SyncSessionRegistry registry;
     private final YjsSnapshotRepository snapshotRepository;
     private final YjsUpdateRepository updateRepository;
+    private final DocumentRestoreQueueService restoreQueueService;
 
     public DocumentSyncHandler(UpdateLogService updateLogService, SnapshotService snapshotService,
                                 SyncSessionRegistry registry, YjsSnapshotRepository snapshotRepository,
-                                YjsUpdateRepository updateRepository) {
+                                YjsUpdateRepository updateRepository, DocumentRestoreQueueService restoreQueueService) {
         this.updateLogService = updateLogService;
         this.snapshotService = snapshotService;
         this.registry = registry;
         this.snapshotRepository = snapshotRepository;
         this.updateRepository = updateRepository;
+        this.restoreQueueService = restoreQueueService;
     }
 
     /**
@@ -78,6 +83,15 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler implements Doc
         }
 
         sendSafely(session, new byte[]{SyncMessageType.CAUGHT_UP});
+
+        // Delivered right after the catch-up burst (not before, not interleaved with it) so a
+        // reconnecting client always has the full prior history applied before the corrective
+        // restore replaces it - order doesn't matter for Yjs CRDT correctness either way, but
+        // this keeps the two "the document's whole life so far" and "then it was restored"
+        // stories in the intuitive order.
+        restoreQueueService.consumePending(documentId)
+                .ifPresent(content -> sendSafely(session, prefixed(SyncMessageType.RESTORE_CONTENT,
+                        content.getBytes(StandardCharsets.UTF_8))));
     }
 
     private static byte[] prefixed(byte prefix, byte[] payload) {
@@ -129,6 +143,28 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler implements Doc
         for (WebSocketSession peer : registry.sessionsFor(documentId)) {
             if (peer.isOpen()) {
                 sendSafely(peer, new byte[]{SyncMessageType.DELETE_NOTICE});
+            }
+        }
+    }
+
+    /**
+     * Called by {@link de.tstieh.stonesync.history.RestoreService} for every file present in a
+     * restore target commit. Delivered live to every currently-connected session for that
+     * document if any are open (it's the caller's responsibility to have already resolved the
+     * documentId), or queued for the next connect otherwise.
+     */
+    @Override
+    public void broadcastOrQueueRestore(UUID documentId, String content) {
+        Set<WebSocketSession> sessions = registry.sessionsFor(documentId);
+        boolean anyOpen = sessions.stream().anyMatch(WebSocketSession::isOpen);
+        if (!anyOpen) {
+            restoreQueueService.enqueue(documentId, content);
+            return;
+        }
+        byte[] frame = prefixed(SyncMessageType.RESTORE_CONTENT, content.getBytes(StandardCharsets.UTF_8));
+        for (WebSocketSession peer : sessions) {
+            if (peer.isOpen()) {
+                sendSafely(peer, frame);
             }
         }
     }

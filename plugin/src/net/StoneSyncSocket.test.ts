@@ -349,6 +349,40 @@ describe("StoneSyncSocket catch-up and delete notice", () => {
 
 		expect(deleteNotices).toBe(1);
 	});
+
+	it("applies a RESTORE_CONTENT frame by replacing the entire Y.Text, and re-broadcasts it as a normal DocUpdate", async () => {
+		FakeWebSocket.instances = [];
+		const doc = new Y.Doc();
+		doc.getText("content").insert(0, "stale local content");
+		const awareness = new Awareness(doc);
+		let restoreCount = 0;
+		const socket = new StoneSyncSocket({
+			wsBaseUrl: "wss://server.example.com",
+			documentId: "doc-123",
+			getTicket: vi.fn(async () => "ticket-1"),
+			doc,
+			awareness,
+			backoff: new ReconnectBackoff({ baseDelayMs: 100, maxDelayMs: 1000, jitter: () => 0.5 }),
+			webSocketFactory: (url) => new FakeWebSocket(url),
+			onRestoreContent: () => restoreCount++,
+		});
+
+		await socket.connect();
+		const ws = FakeWebSocket.instances[0];
+		ws.simulateOpen();
+		ws.sent = [];
+
+		const payload = new TextEncoder().encode("restored content");
+		ws.simulateMessage(new Uint8Array([0x05, ...payload]));
+
+		expect(doc.getText("content").toString()).toBe("restored content");
+		expect(restoreCount).toBe(1);
+
+		// the replace must flow back out as an ordinary 0x00 frame, so the server persists it
+		expect(ws.sent).toHaveLength(1);
+		const decoded = decodeMessage(ws.sent[0] as Uint8Array);
+		expect(decoded.type).toBe(MessageType.DocUpdate);
+	});
 });
 
 describe("isAuthError", () => {

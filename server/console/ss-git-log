@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/admin-env.sh
+
+if [ "${1:-}" = "" ]; then
+	echo "Usage: ss-git-log <vaultId>" >&2
+	exit 1
+fi
+
+curl -sf "$ADMIN_BASE/vaults/$1/git-log" -H "$ADMIN_AUTH" | jq .

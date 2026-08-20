@@ -91,6 +91,53 @@ public class DocumentService {
                 .toList();
     }
 
+    /** Resolves a document's vault and current path - used by {@code MaterializeService}. */
+    public DocumentLocation locate(UUID userId, UUID documentId) {
+        DocumentEntity document = repository.findById(documentId)
+                .orElseThrow(() -> new DocumentNotFoundException(documentId));
+        vaultAccessService.requireAccess(userId, document.getVaultId());
+        return new DocumentLocation(document.getVaultId(), document.getCurrentPath());
+    }
+
+    /**
+     * Every non-deleted (id, path) pair of a vault, without a per-user access check - used by
+     * {@code RestoreService}, which runs as an already-authenticated console/admin operation
+     * rather than on behalf of a specific end user (same convention as the rest of the
+     * {@code /api/admin/**} surface, which likewise doesn't scope by user - see
+     * {@code InviteAdminController}).
+     */
+    public List<DocumentSummary> listNonDeletedForRestore(UUID vaultId) {
+        return repository.findByVaultId(vaultId).stream()
+                .filter(document -> !document.isDeleted())
+                .map(document -> new DocumentSummary(document.getId(), document.getCurrentPath(), document.getContentType()))
+                .toList();
+    }
+
+    /** System-level counterpart to {@link #resolveOrCreate} - see {@link #listNonDeletedForRestore}. */
+    @Transactional
+    public UUID resolveOrCreateForRestore(UUID vaultId, String path, DocumentEntity.ContentType contentType) {
+        return repository.findByVaultIdAndCurrentPath(vaultId, path)
+                .map(DocumentEntity::getId)
+                .orElseGet(() -> {
+                    DocumentEntity created = new DocumentEntity(UUID.randomUUID(), vaultId, path, contentType, clock.instant());
+                    repository.save(created);
+                    return created.getId();
+                });
+    }
+
+    /** System-level counterpart to {@link #markDeleted} - see {@link #listNonDeletedForRestore}. */
+    @Transactional
+    public void markDeletedForRestore(UUID documentId) {
+        DocumentEntity document = repository.findById(documentId)
+                .orElseThrow(() -> new DocumentNotFoundException(documentId));
+        document.markDeleted(clock.instant());
+        repository.save(document);
+        deletionBroadcaster.broadcastDeleteNotice(documentId);
+    }
+
     public record DocumentSummary(UUID id, String path, DocumentEntity.ContentType contentType) {
+    }
+
+    public record DocumentLocation(UUID vaultId, String path) {
     }
 }

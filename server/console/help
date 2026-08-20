@@ -11,6 +11,7 @@ Read-only (direct DB query, always available):
   ss-docs [vault]                   list documents, optionally filtered by vault id
   ss-updates                        pending (unsnapshotted) Yjs update count per document
   ss-attachments                    attachment count + disk usage of /data/vault
+  ss-git-log <vault>                per-vault materialized-history commit log
   ss-users                          list users (id, email, created_at — no secrets)
   ss-apikeys <user>                 list a user's API keys (id, name, revoked?)
 
@@ -28,6 +29,10 @@ Write (via the Admin REST API, needs CONSOLE_API_KEY set on the container):
                                     create a single-use, 7-day invite link for a vault, bound
                                     to one colleague's email (they log in via Authentik with
                                     exactly that email and get auto-provisioned)
+  ss-vault-restore <vault> <commitIsh>
+                                    restore a vault to a point-in-time git commit (see
+                                    ss-git-log) - any document not present in that commit is
+                                    tombstoned. No confirmation prompt; double-check the commit.
 
 Container logs are not duplicated here on purpose — use Portainer's own
 "Logs" tab for that (streams `docker logs` directly, no extra tooling

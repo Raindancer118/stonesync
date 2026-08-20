@@ -10,6 +10,9 @@
  * 0x03 = SNAPSHOT_PAYLOAD   (client->server only, response to REQUEST_SNAPSHOT)
  * 0x04 = CAUGHT_UP          (server->client only, no payload - marks the end
  *                            of the on-connect history replay burst)
+ * 0x05 = RESTORE_CONTENT    (server->client only, UTF-8 plaintext payload -
+ *                            replace the entire document content, a git
+ *                            restore point-in-time)
  * 0x06 = DELETE_NOTICE      (server->client only, no payload - the document
  *                            was tombstoned, remove it locally)
  */
@@ -19,6 +22,7 @@ export enum MessageType {
 	RequestSnapshot = 0x02,
 	SnapshotPayload = 0x03,
 	CaughtUp = 0x04,
+	RestoreContent = 0x05,
 	DeleteNotice = 0x06,
 }
 
@@ -41,6 +45,7 @@ function isKnownMessageType(value: number): value is MessageType {
 		value === MessageType.RequestSnapshot ||
 		value === MessageType.SnapshotPayload ||
 		value === MessageType.CaughtUp ||
+		value === MessageType.RestoreContent ||
 		value === MessageType.DeleteNotice
 	);
 }
