@@ -31,16 +31,18 @@ public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandle
     private final InviteService inviteService;
     private final UserRepository userRepository;
     private final AdminService adminService;
+    private final ApiKeyExchangeService exchangeService;
     private final ApiKeyHasher apiKeyHasher;
     private final PublicUrlProperties publicUrlProperties;
     private final SecureRandom random = new SecureRandom();
 
     public AuthentikLoginSuccessHandler(InviteService inviteService, UserRepository userRepository,
-                                         AdminService adminService, ApiKeyHasher apiKeyHasher,
-                                         PublicUrlProperties publicUrlProperties) {
+                                         AdminService adminService, ApiKeyExchangeService exchangeService,
+                                         ApiKeyHasher apiKeyHasher, PublicUrlProperties publicUrlProperties) {
         this.inviteService = inviteService;
         this.userRepository = userRepository;
         this.adminService = adminService;
+        this.exchangeService = exchangeService;
         this.apiKeyHasher = apiKeyHasher;
         this.publicUrlProperties = publicUrlProperties;
     }
@@ -62,26 +64,32 @@ public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandle
             return;
         }
 
+        OidcUser oidcUser = (OidcUser) authentication.getPrincipal();
+        String email = oidcUser.getEmail();
+        String displayName = oidcUser.getFullName() != null ? oidcUser.getFullName() : email;
+
         RedeemedInvite redeemed;
         try {
-            redeemed = inviteService.redeem(rawToken);
+            redeemed = inviteService.redeem(rawToken, email);
         } catch (InviteNotFoundException | InviteNoLongerValidException e) {
             writeErrorPage(response, "This invite link is no longer valid: " + escapeHtml(e.getMessage())
                     + ". Please ask for a new one.");
             return;
+        } catch (InviteEmailMismatchException e) {
+            writeErrorPage(response, "This invite was created for a different email address than the "
+                    + "one you just logged in with (" + escapeHtml(email) + "). Please ask for a new invite "
+                    + "addressed to you, or log into Authentik with the correct account.");
+            return;
         }
-
-        OidcUser oidcUser = (OidcUser) authentication.getPrincipal();
-        String email = oidcUser.getEmail();
-        String displayName = oidcUser.getFullName() != null ? oidcUser.getFullName() : email;
 
         UserEntity user = userRepository.findByEmail(email)
                 .orElseGet(() -> adminService.createUser(email, randomPlaceholderPasswordHash()));
 
         adminService.grantAccess(user.getId(), redeemed.vaultId(), redeemed.role());
         String rawApiKey = adminService.createApiKey(user.getId(), "invite-" + UUID.randomUUID());
+        String exchangeCode = exchangeService.create(rawApiKey, redeemed.vaultId(), displayName);
 
-        String deepLink = DeepLinkBuilder.build(publicUrlProperties.requireUrl(), rawApiKey, redeemed.vaultId(), displayName);
+        String deepLink = DeepLinkBuilder.build(publicUrlProperties.requireUrl(), exchangeCode);
         writeSuccessPage(response, deepLink, displayName);
     }
 

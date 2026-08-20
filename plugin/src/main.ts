@@ -6,6 +6,7 @@ import { AttachmentSync } from "./attachments/AttachmentSync";
 import { VaultDownloadService } from "./sync/VaultDownloadService";
 import { createSyncExtension } from "./editor/syncExtension";
 import { parseConnectParams } from "./onboarding/DeepLinkHandler";
+import { exchangeCode } from "./onboarding/ApiKeyExchangeClient";
 
 const CURSOR_COLORS = [
 	"#e57373",
@@ -121,13 +122,22 @@ export default class StoneSyncPlugin extends Plugin {
 			return;
 		}
 
+		let exchanged;
+		try {
+			exchanged = await exchangeCode(parsed.serverUrl, parsed.exchangeCode);
+		} catch (error) {
+			console.error("[StoneSync] Failed to exchange connect code", error);
+			new Notice("StoneSync: This connect link has expired or was already used - please request a new invite.");
+			return;
+		}
+
 		this.settings.serverUrl = parsed.serverUrl;
-		this.settings.apiKey = parsed.apiKey;
-		this.settings.vaultId = parsed.vaultId;
-		this.settings.displayName = parsed.displayName;
+		this.settings.apiKey = exchanged.apiKey;
+		this.settings.vaultId = exchanged.vaultId;
+		this.settings.displayName = exchanged.displayName;
 		await this.saveSettings();
 
-		new Notice(`StoneSync: Connected as ${parsed.displayName}. Sync is now active.`);
+		new Notice(`StoneSync: Connected as ${exchanged.displayName}. Sync is now active.`);
 		await this.syncManager?.onActiveLeafChange();
 		await this.downloadEntireVault();
 	}

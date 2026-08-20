@@ -35,8 +35,10 @@ public class SecurityConfig {
     public SecurityFilterChain oauthLoginFilterChain(HttpSecurity http, AuthentikLoginSuccessHandler successHandler)
             throws Exception {
         http
-                .securityMatcher("/login/**", "/oauth2/**", "/invite/**")
-                .csrf(csrf -> csrf.disable()) // idempotent GETs only on this surface, no state-changing form posts
+                .securityMatcher("/login/**", "/oauth2/**", "/invite/**", "/api/auth/exchange")
+                // /api/auth/exchange is the one state-changing POST on this surface: it hands out
+                // a device's very first credential before any session/CSRF token could exist.
+                .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().permitAll())
                 .oauth2Login(oauth2 -> oauth2.successHandler(successHandler));
         return http.build();

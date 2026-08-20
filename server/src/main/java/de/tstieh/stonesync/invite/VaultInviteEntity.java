@@ -28,6 +28,9 @@ public class VaultInviteEntity {
     @Column(name = "token_hash", nullable = false, unique = true)
     private String tokenHash;
 
+    @Column(name = "invitee_email", nullable = false)
+    private String inviteeEmail;
+
     @Column(name = "created_by", nullable = false)
     private UUID createdBy;
 
@@ -44,12 +47,13 @@ public class VaultInviteEntity {
         // JPA
     }
 
-    public VaultInviteEntity(UUID id, UUID vaultId, VaultRole role, String tokenHash, UUID createdBy,
-                              Instant createdAt, Instant expiresAt) {
+    public VaultInviteEntity(UUID id, UUID vaultId, VaultRole role, String tokenHash, String inviteeEmail,
+                              UUID createdBy, Instant createdAt, Instant expiresAt) {
         this.id = id;
         this.vaultId = vaultId;
         this.role = role;
         this.tokenHash = tokenHash;
+        this.inviteeEmail = inviteeEmail;
         this.createdBy = createdBy;
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
@@ -69,6 +73,10 @@ public class VaultInviteEntity {
 
     public String getTokenHash() {
         return tokenHash;
+    }
+
+    public String getInviteeEmail() {
+        return inviteeEmail;
     }
 
     public UUID getCreatedBy() {

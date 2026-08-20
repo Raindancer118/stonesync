@@ -32,25 +32,27 @@ public class InviteService {
         this.clock = clock;
     }
 
-    /** Creates a new invite and returns the raw token - shown to the caller only once. */
+    /** Creates a new invite bound to a specific colleague's email and returns the raw token. */
     @Transactional
-    public String createInvite(UUID vaultId, VaultRole role, UUID createdBy) {
+    public String createInvite(UUID vaultId, VaultRole role, String inviteeEmail, UUID createdBy) {
         String rawToken = hasher.generateRawKey();
         Instant now = clock.instant();
         VaultInviteEntity entity = new VaultInviteEntity(UUID.randomUUID(), vaultId, role,
-                hasher.hash(rawToken), createdBy, now, now.plus(DEFAULT_VALIDITY));
+                hasher.hash(rawToken), normalize(inviteeEmail), createdBy, now, now.plus(DEFAULT_VALIDITY));
         repository.save(entity);
         return rawToken;
     }
 
     /**
      * Validates and consumes an invite token. Throws {@link InviteNotFoundException} for an
-     * unknown token, or {@link InviteNoLongerValidException} for a known token that has expired
-     * or was already redeemed - both are terminal for that token, there is no retry path other
-     * than the vault owner issuing a fresh invite.
+     * unknown token, {@link InviteNoLongerValidException} for a known token that has expired or
+     * was already redeemed, or {@link InviteEmailMismatchException} if the Authentik-verified
+     * email doesn't match who the invite was created for - a leaked link is then useless to
+     * anyone else, since the invite is NOT consumed on a mismatch and can still be redeemed by
+     * the right person.
      */
     @Transactional
-    public RedeemedInvite redeem(String rawToken) {
+    public RedeemedInvite redeem(String rawToken, String verifiedEmail) {
         VaultInviteEntity invite = repository.findByTokenHash(hasher.hash(rawToken))
                 .orElseThrow(() -> new InviteNotFoundException("Unknown invite token"));
 
@@ -61,9 +63,17 @@ public class InviteService {
         if (invite.isExpired(now)) {
             throw new InviteNoLongerValidException("This invite has expired");
         }
+        if (!invite.getInviteeEmail().equals(normalize(verifiedEmail))) {
+            throw new InviteEmailMismatchException(
+                    "This invite was created for a different email address");
+        }
 
         invite.markConsumed(now);
         repository.save(invite);
         return new RedeemedInvite(invite.getVaultId(), invite.getRole());
+    }
+
+    private static String normalize(String email) {
+        return email.trim().toLowerCase();
     }
 }

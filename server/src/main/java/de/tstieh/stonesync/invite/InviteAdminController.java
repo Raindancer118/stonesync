@@ -1,6 +1,9 @@
 package de.tstieh.stonesync.invite;
 
 import de.tstieh.stonesync.admin.VaultRole;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,15 +32,15 @@ public class InviteAdminController {
     }
 
     @PostMapping("/vaults/{vaultId}/invites")
-    public InviteResponse createInvite(@PathVariable UUID vaultId, @RequestBody CreateInviteRequest request,
+    public InviteResponse createInvite(@PathVariable UUID vaultId, @Valid @RequestBody CreateInviteRequest request,
                                         Authentication authentication) {
         UUID createdBy = (UUID) authentication.getPrincipal();
-        String rawToken = inviteService.createInvite(vaultId, request.role(), createdBy);
+        String rawToken = inviteService.createInvite(vaultId, request.role(), request.inviteeEmail(), createdBy);
         String inviteUrl = publicUrlProperties.requireUrl() + "/invite/" + rawToken;
         return new InviteResponse(inviteUrl);
     }
 
-    public record CreateInviteRequest(@NotNull VaultRole role) {
+    public record CreateInviteRequest(@NotNull VaultRole role, @NotBlank @Email String inviteeEmail) {
     }
 
     public record InviteResponse(String inviteUrl) {
