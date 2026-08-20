@@ -1,5 +1,6 @@
 package de.tstieh.stonesync;
 
+import de.tstieh.stonesync.auth.AuthentikProfileActivator;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
@@ -9,6 +10,8 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 public class StoneSyncServerApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(StoneSyncServerApplication.class, args);
+        SpringApplication application = new SpringApplication(StoneSyncServerApplication.class);
+        AuthentikProfileActivator.applyTo(application);
+        application.run(args);
     }
 }
