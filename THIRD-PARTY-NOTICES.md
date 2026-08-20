@@ -34,3 +34,13 @@ Obsidian provides at runtime.
 Apache-2.0 requires that a copy of the license and any NOTICE file accompany binary
 distributions; the Spring Boot fat jar carries these inside `META-INF`. When shipping
 StoneSync to a customer, ship this file alongside it.
+
+## Trademarks
+
+"Obsidian" and the Obsidian logo are trademarks of **Dynalist Inc.** StoneSync is an
+independent third-party plugin and server and is not affiliated with, authorised,
+sponsored or endorsed by Dynalist Inc.
+
+All other product names, logos and brands referenced here - including Yjs, CodeMirror,
+PostgreSQL, Java, Spring, Docker and GitHub - are the property of their respective
+owners and are used for identification purposes only.

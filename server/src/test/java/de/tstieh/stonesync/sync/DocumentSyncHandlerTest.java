@@ -10,6 +10,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.WebSocketSession;
 
+import de.tstieh.stonesync.access.AccessLevel;
+import de.tstieh.stonesync.audit.AuditService;
+import de.tstieh.stonesync.auth.WsHandshakeInterceptor;
+
 import java.net.URI;
 import java.time.Instant;
 import java.util.HashMap;
@@ -44,6 +48,10 @@ class DocumentSyncHandlerTest {
     @Mock
     private DocumentRestoreQueueService restoreQueueService;
     @Mock
+    private AuditService auditService;
+    @Mock
+    private DocumentRepository documentRepository;
+    @Mock
     private WebSocketSession sender;
     @Mock
     private WebSocketSession otherClient;
@@ -54,9 +62,11 @@ class DocumentSyncHandlerTest {
     @BeforeEach
     void setUp() throws Exception {
         handler = new DocumentSyncHandler(updateLogService, snapshotService, registry,
-                snapshotRepository, updateRepository, restoreQueueService);
+                snapshotRepository, updateRepository, restoreQueueService, auditService, documentRepository);
 
         Map<String, Object> attrs = new HashMap<>();
+        attrs.put(WsHandshakeInterceptor.ACCESS_LEVEL_ATTRIBUTE, AccessLevel.EDITOR);
+        attrs.put(WsHandshakeInterceptor.USER_ID_ATTRIBUTE, UUID.randomUUID());
         lenient().when(sender.getUri()).thenReturn(URI.create("/ws/sync/" + documentId));
         lenient().when(sender.getAttributes()).thenReturn(attrs);
         lenient().when(sender.getId()).thenReturn("sender-session");
@@ -73,6 +83,38 @@ class DocumentSyncHandlerTest {
         full[0] = (byte) prefix;
         System.arraycopy(payload, 0, full, 1, payload.length);
         return full;
+    }
+
+    @Test
+    @DisplayName("a read-only collaborator's document update is neither persisted nor relayed")
+    void viewerCannotWriteThroughTheSyncSocket() throws Exception {
+        sender.getAttributes().put(WsHandshakeInterceptor.ACCESS_LEVEL_ATTRIBUTE, AccessLevel.VIEWER);
+
+        handler.handleMessage(sender, new BinaryMessage(messageOf(0x00, (byte) 1, (byte) 2)));
+
+        verify(updateLogService, never()).append(any(), any());
+        verify(otherClient, never()).sendMessage(any());
+    }
+
+    @Test
+    @DisplayName("a read-only collaborator may still receive and send presence")
+    void viewerMayStillShareCursorPresence() throws Exception {
+        sender.getAttributes().put(WsHandshakeInterceptor.ACCESS_LEVEL_ATTRIBUTE, AccessLevel.VIEWER);
+        when(registry.sessionsFor(documentId)).thenReturn(java.util.Set.of(sender, otherClient));
+
+        handler.handleMessage(sender, new BinaryMessage(messageOf(0x01, (byte) 9)));
+
+        verify(otherClient).sendMessage(any(BinaryMessage.class));
+    }
+
+    @Test
+    @DisplayName("a snapshot payload from a read-only collaborator is refused too")
+    void viewerCannotCompactTheLog() throws Exception {
+        sender.getAttributes().put(WsHandshakeInterceptor.ACCESS_LEVEL_ATTRIBUTE, AccessLevel.VIEWER);
+
+        handler.handleMessage(sender, new BinaryMessage(messageOf(0x03, (byte) 5)));
+
+        verify(snapshotService, never()).replaceLogWithSnapshot(any(), any());
     }
 
     @Test

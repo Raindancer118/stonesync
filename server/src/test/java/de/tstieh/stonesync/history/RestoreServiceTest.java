@@ -51,7 +51,8 @@ class RestoreServiceTest {
     @Test
     @DisplayName("restoring without vault access fails before the git tree is ever read (IDOR/leaked-key protection)")
     void restoreWithoutVaultAccessIsDenied() {
-        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService)
+                .requireVaultPermission(userId, vaultId, de.tstieh.stonesync.access.Permission.MANAGE_VAULT);
 
         assertThatThrownBy(() -> service.restore(userId, vaultId, "abc123"))
                 .isInstanceOf(VaultAccessDeniedException.class);
@@ -62,7 +63,8 @@ class RestoreServiceTest {
     @Test
     @DisplayName("reading the git log without vault access fails before the repository is ever queried")
     void logWithoutVaultAccessIsDenied() {
-        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService)
+                .requireVaultPermission(userId, vaultId, de.tstieh.stonesync.access.Permission.MANAGE_VAULT);
 
         assertThatThrownBy(() -> service.log(userId, vaultId))
                 .isInstanceOf(VaultAccessDeniedException.class);

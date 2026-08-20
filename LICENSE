@@ -67,7 +67,17 @@ Copyright (c) 2026 Tom Stieh. All rights reserved.
    injury to life, body or health, and under the Produkthaftungsgesetz -
    remains unaffected.
 
-9. Governing law
+9. Trademarks
+   "Obsidian" and the Obsidian logo are trademarks of Dynalist Inc. StoneSync is
+   an independent third-party plugin and server; it is not affiliated with,
+   authorised, sponsored or endorsed by Dynalist Inc. All other product names,
+   logos and brands mentioned - including Yjs, CodeMirror, PostgreSQL, Java,
+   Spring, Docker and GitHub - are the property of their respective owners and
+   are used for identification purposes only. Their use here does not imply any
+   affiliation with or endorsement by them. No trademark rights are granted by
+   this license.
+
+10. Governing law
    This license is governed by the laws of the Federal Republic of Germany,
    excluding its conflict-of-law rules and the UN Convention on Contracts for
    the International Sale of Goods (CISG).

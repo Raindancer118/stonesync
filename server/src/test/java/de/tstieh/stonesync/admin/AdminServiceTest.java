@@ -42,6 +42,9 @@ class AdminServiceTest {
     private DocumentRepository documentRepository;
 
     private final ApiKeyHasher hasher = new ApiKeyHasher();
+    @org.mockito.Mock
+    private de.tstieh.stonesync.audit.AuditService auditService;
+
     private AdminService service;
     private final UUID userId = UUID.randomUUID();
 
@@ -49,7 +52,7 @@ class AdminServiceTest {
     void setUp() {
         Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
         service = new AdminService(userRepository, vaultRepository, accessRepository, apiKeyRepository,
-                documentRepository, hasher, clock);
+                documentRepository, hasher, auditService, clock);
     }
 
     @Test

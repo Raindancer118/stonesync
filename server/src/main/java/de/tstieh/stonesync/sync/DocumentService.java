@@ -124,6 +124,17 @@ public class DocumentService {
                 });
     }
 
+    /**
+     * Vault + path of a document without any access check - only for callers that perform the
+     * check themselves immediately afterwards (the WebSocket handshake, which needs the path
+     * *before* it can ask whether this user may see that path).
+     */
+    public DocumentLocation locateUnchecked(UUID documentId) {
+        return repository.findById(documentId)
+                .map(document -> new DocumentLocation(document.getVaultId(), document.getCurrentPath()))
+                .orElseThrow(() -> new DocumentNotFoundException(documentId));
+    }
+
     /** Looks up the vault a document belongs to - used by callers that only hold a documentId. */
     public UUID vaultIdOf(UUID documentId) {
         return repository.findById(documentId)

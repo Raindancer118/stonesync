@@ -23,6 +23,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -56,7 +57,8 @@ class WsHandshakeInterceptorTest {
     @DisplayName("a valid ticket + vault access allows the handshake and stores the userId in the session attributes")
     void validTicketAndVaultAccessAllowsHandshake() throws Exception {
         UUID ticket = ticketService.issueTicket(userId);
-        when(documentService.vaultIdOf(documentId)).thenReturn(vaultId);
+        when(documentService.locateUnchecked(documentId))
+                .thenReturn(new DocumentService.DocumentLocation(vaultId, "notes/shared.md"));
         ServerHttpRequest request = requestWithQuery("ticket=" + ticket);
         ServerHttpResponse response = mock(ServerHttpResponse.class);
         Map<String, Object> attributes = new HashMap<>();
@@ -99,7 +101,8 @@ class WsHandshakeInterceptorTest {
     @DisplayName("a ticket can only be used once for the handshake")
     void ticketIsConsumedAfterHandshake() throws Exception {
         UUID ticket = ticketService.issueTicket(userId);
-        when(documentService.vaultIdOf(documentId)).thenReturn(vaultId);
+        when(documentService.locateUnchecked(documentId))
+                .thenReturn(new DocumentService.DocumentLocation(vaultId, "notes/shared.md"));
         ServerHttpResponse response = mock(ServerHttpResponse.class);
         WebSocketHandler handler = mock(WebSocketHandler.class);
 
@@ -114,8 +117,11 @@ class WsHandshakeInterceptorTest {
     @DisplayName("a valid ticket, but no vault access for the user, rejects the handshake (IDOR protection on the sync channel)")
     void validTicketButNoVaultAccessRejectsHandshake() throws Exception {
         UUID ticket = ticketService.issueTicket(userId);
-        when(documentService.vaultIdOf(documentId)).thenReturn(vaultId);
-        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+        when(documentService.locateUnchecked(documentId))
+                .thenReturn(new DocumentService.DocumentLocation(vaultId, "notes/shared.md"));
+        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService)
+                .requirePathPermission(eq(userId), eq(vaultId), org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any());
         ServerHttpRequest request = requestWithQuery("ticket=" + ticket);
         ServerHttpResponse response = mock(ServerHttpResponse.class);
         Map<String, Object> attributes = new HashMap<>();
@@ -131,7 +137,7 @@ class WsHandshakeInterceptorTest {
     @DisplayName("a valid ticket, but an unknown documentId in the URL, rejects the handshake")
     void validTicketButUnknownDocumentRejectsHandshake() throws Exception {
         UUID ticket = ticketService.issueTicket(userId);
-        when(documentService.vaultIdOf(documentId)).thenThrow(new DocumentNotFoundException(documentId));
+        when(documentService.locateUnchecked(documentId)).thenThrow(new DocumentNotFoundException(documentId));
         ServerHttpRequest request = requestWithQuery("ticket=" + ticket);
         ServerHttpResponse response = mock(ServerHttpResponse.class);
         Map<String, Object> attributes = new HashMap<>();

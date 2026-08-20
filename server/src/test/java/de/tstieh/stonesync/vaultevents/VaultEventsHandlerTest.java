@@ -32,16 +32,24 @@ class VaultEventsHandlerTest {
     @Mock
     private WebSocketSession session;
 
+    @org.mockito.Mock
+    private de.tstieh.stonesync.admin.VaultAccessService vaultAccessService;
+
     private VaultEventsHandler handler;
     private final UUID vaultId = UUID.randomUUID();
     private final UUID documentId = UUID.randomUUID();
+    private final UUID userId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
-        handler = new VaultEventsHandler(registry, new ObjectMapper());
+        handler = new VaultEventsHandler(registry, new ObjectMapper(), vaultAccessService);
         lenient().when(session.getUri()).thenReturn(URI.create("/ws/vault/" + vaultId));
         lenient().when(session.getId()).thenReturn("session-1");
         lenient().when(session.isOpen()).thenReturn(true);
+        lenient().when(session.getAttributes()).thenReturn(new java.util.HashMap<>(java.util.Map.of(
+                de.tstieh.stonesync.auth.VaultWsHandshakeInterceptor.USER_ID_ATTRIBUTE, userId)));
+        lenient().when(vaultAccessService.canRead(org.mockito.ArgumentMatchers.eq(userId),
+                org.mockito.ArgumentMatchers.eq(vaultId), org.mockito.ArgumentMatchers.anyString())).thenReturn(true);
     }
 
     @Test
@@ -96,6 +104,18 @@ class VaultEventsHandlerTest {
         doReturn(Set.of(session)).when(registry).sessionsFor(vaultId);
 
         handler.notifyDocumentDeleted(vaultId, documentId, "notes/a.md", null);
+
+        verify(session, never()).sendMessage(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("a subscriber is never told about a note they may not read")
+    void eventsAreFilteredPerSubscriber() throws Exception {
+        when(registry.sessionsFor(vaultId)).thenReturn(java.util.Set.of(session));
+        when(vaultAccessService.canRead(userId, vaultId, "Privat/diary.md")).thenReturn(false);
+
+        handler.notifyDocumentCreated(vaultId, documentId, "Privat/diary.md",
+                de.tstieh.stonesync.sync.DocumentEntity.ContentType.TEXT, null);
 
         verify(session, never()).sendMessage(org.mockito.ArgumentMatchers.any());
     }

@@ -2,6 +2,8 @@ package de.tstieh.stonesync.vaultevents;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import de.tstieh.stonesync.admin.VaultAccessService;
+import de.tstieh.stonesync.auth.VaultWsHandshakeInterceptor;
 import de.tstieh.stonesync.logging.AppLog;
 import de.tstieh.stonesync.sync.DocumentEntity;
 import de.tstieh.stonesync.sync.VaultEventBroadcaster;
@@ -28,10 +30,13 @@ public class VaultEventsHandler extends TextWebSocketHandler implements VaultEve
 
     private final VaultEventsSessionRegistry registry;
     private final ObjectMapper objectMapper;
+    private final VaultAccessService vaultAccessService;
 
-    public VaultEventsHandler(VaultEventsSessionRegistry registry, ObjectMapper objectMapper) {
+    public VaultEventsHandler(VaultEventsSessionRegistry registry, ObjectMapper objectMapper,
+                               VaultAccessService vaultAccessService) {
         this.registry = registry;
         this.objectMapper = objectMapper;
+        this.vaultAccessService = vaultAccessService;
     }
 
     @Override
@@ -72,7 +77,7 @@ public class VaultEventsHandler extends TextWebSocketHandler implements VaultEve
 
         int notified = 0;
         for (WebSocketSession session : registry.sessionsFor(vaultId)) {
-            if (session.isOpen()) {
+            if (session.isOpen() && maySee(session, vaultId, message.path())) {
                 try {
                     session.sendMessage(new TextMessage(json));
                     notified++;
@@ -82,6 +87,20 @@ public class VaultEventsHandler extends TextWebSocketHandler implements VaultEve
             }
         }
         AppLog.debug("Broadcast {} for vault {} to {} session(s)", message.type(), vaultId, notified);
+    }
+
+    /**
+     * Events are filtered per recipient, not just per vault: this channel is what makes a client
+     * download a newly created note, so telling someone about a note they may not read would pull
+     * exactly that content onto their device. A session without a resolvable user is told nothing.
+     */
+    private boolean maySee(WebSocketSession session, UUID vaultId, String path) {
+        Object userId = session.getAttributes().get(VaultWsHandshakeInterceptor.USER_ID_ATTRIBUTE);
+        if (!(userId instanceof UUID id)) {
+            AppLog.warn("Vault-events session {} has no user attribute - not delivering events", session.getId());
+            return false;
+        }
+        return vaultAccessService.canRead(id, vaultId, path);
     }
 
     private UUID vaultIdOf(WebSocketSession session) {

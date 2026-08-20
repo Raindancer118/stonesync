@@ -40,6 +40,8 @@ class AttachmentServiceTest {
     private DocumentService documentService;
     @Mock
     private VaultAccessService vaultAccessService;
+    @Mock
+    private de.tstieh.stonesync.audit.AuditService auditService;
 
     private AttachmentService service;
     private final UUID documentId = UUID.randomUUID();
@@ -48,8 +50,12 @@ class AttachmentServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AttachmentService(repository, storage, documentService, vaultAccessService);
+        service = new AttachmentService(repository, storage, documentService, vaultAccessService, auditService);
         lenient().when(documentService.vaultIdOf(documentId)).thenReturn(vaultId);
+        lenient().when(documentService.locateForWrite(userId, documentId))
+                .thenReturn(new DocumentService.DocumentLocation(vaultId, "assets/image.png"));
+        lenient().when(documentService.locate(userId, documentId))
+                .thenReturn(new DocumentService.DocumentLocation(vaultId, "assets/image.png"));
     }
 
     @Test
@@ -143,7 +149,7 @@ class AttachmentServiceTest {
     void uploadWithoutVaultAccessIsDenied() {
         byte[] bytes = {1, 2, 3};
         String hash = sha256Hex(bytes);
-        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+        doThrow(new VaultAccessDeniedException("denied")).when(documentService).locateForWrite(userId, documentId);
 
         assertThatThrownBy(() -> service.upload(userId, documentId, hash, bytes, Instant.now()))
                 .isInstanceOf(VaultAccessDeniedException.class);
@@ -155,7 +161,7 @@ class AttachmentServiceTest {
     @Test
     @DisplayName("downloading without vault access fails before any bytes are ever read (IDOR protection)")
     void downloadWithoutVaultAccessIsDenied() {
-        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+        doThrow(new VaultAccessDeniedException("denied")).when(documentService).locate(userId, documentId);
 
         assertThatThrownBy(() -> service.download(userId, documentId))
                 .isInstanceOf(VaultAccessDeniedException.class);
@@ -176,7 +182,7 @@ class AttachmentServiceTest {
     @DisplayName("download reads back the exact bytes that were stored, round-tripped through the real filesystem storage")
     void downloadRoundTripsRealBytesThroughFilesystemStorage(@TempDir Path tempDir) {
         FileSystemAttachmentStorage realStorage = new FileSystemAttachmentStorage(new StorageProperties(tempDir.toString()));
-        AttachmentService realService = new AttachmentService(repository, realStorage, documentService, vaultAccessService);
+        AttachmentService realService = new AttachmentService(repository, realStorage, documentService, vaultAccessService, auditService);
         byte[] bytes = "round-trip content, exact bytes expected back".getBytes();
         String hash = sha256Hex(bytes);
         when(repository.findById(documentId)).thenReturn(Optional.empty());

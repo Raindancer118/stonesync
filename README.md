@@ -141,5 +141,6 @@ part of this release yet.
 Third-party components keep their own licenses, listed in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-Versions released before 20 August 2026 were published under AGPL-3.0 and stay
-AGPL-3.0 for anyone who obtained them.
+"Obsidian" and the Obsidian logo are trademarks of Dynalist Inc. StoneSync is an
+independent third-party project and is not affiliated with, authorised or endorsed
+by Dynalist Inc.

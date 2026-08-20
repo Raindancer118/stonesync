@@ -1,5 +1,10 @@
 package de.tstieh.stonesync.sync;
 
+import de.tstieh.stonesync.access.AccessLevel;
+import de.tstieh.stonesync.access.Permission;
+import de.tstieh.stonesync.audit.AuditEventType;
+import de.tstieh.stonesync.audit.AuditService;
+import de.tstieh.stonesync.auth.WsHandshakeInterceptor;
 import de.tstieh.stonesync.logging.AppLog;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.BinaryMessage;
@@ -43,6 +48,16 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
     private final YjsSnapshotRepository snapshotRepository;
     private final YjsUpdateRepository updateRepository;
     private final DocumentRestoreQueueService restoreQueueService;
+    private final AuditService auditService;
+    /**
+     * The repository, not {@code DocumentService}: the sync handler is itself the
+     * {@link DocumentDeletionBroadcaster} that {@code DocumentService} depends on, so injecting
+     * the service here would close a bean cycle. Only the (vaultId, path) of a document is needed
+     * anyway, for auditing a refused write.
+     */
+    private final DocumentRepository documentRepository;
+    /** Sessions already audited for a refused write, so a misbehaving client cannot flood the trail. */
+    private final java.util.Set<String> refusalAudited = java.util.concurrent.ConcurrentHashMap.newKeySet();
     /**
      * Last awareness (presence/cursor) frame each session sent, keyed by session id.
      *
@@ -57,13 +72,16 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
 
     public DocumentSyncHandler(UpdateLogService updateLogService, SnapshotService snapshotService,
                                 SyncSessionRegistry registry, YjsSnapshotRepository snapshotRepository,
-                                YjsUpdateRepository updateRepository, DocumentRestoreQueueService restoreQueueService) {
+                                YjsUpdateRepository updateRepository, DocumentRestoreQueueService restoreQueueService,
+                                AuditService auditService, DocumentRepository documentRepository) {
         this.updateLogService = updateLogService;
         this.snapshotService = snapshotService;
         this.registry = registry;
         this.snapshotRepository = snapshotRepository;
         this.updateRepository = updateRepository;
         this.restoreQueueService = restoreQueueService;
+        this.auditService = auditService;
+        this.documentRepository = documentRepository;
     }
 
     /**
@@ -135,6 +153,7 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
         AppLog.debug("WS connection closed for document {} (session {}, status {})", documentId, session.getId(), status);
         registry.unregister(documentId, session);
         lastAwarenessBySession.remove(session.getId());
+        refusalAudited.remove(session.getId());
     }
 
     @Override
@@ -150,6 +169,10 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
         byte[] payload = Arrays.copyOfRange(raw, 1, raw.length);
 
         if (prefix == SyncMessageType.DOC_UPDATE) {
+            if (!mayWrite(session)) {
+                refuseWrite(session, documentId, "document update");
+                return;
+            }
             updateLogService.append(documentId, payload);
             broadcastToOthers(documentId, session, raw);
             if (updateLogService.exceedsSnapshotThreshold(documentId)) {
@@ -159,6 +182,10 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
             lastAwarenessBySession.put(session.getId(), raw);
             broadcastToOthers(documentId, session, raw);
         } else if (prefix == SyncMessageType.SNAPSHOT_PAYLOAD) {
+            if (!mayWrite(session)) {
+                refuseWrite(session, documentId, "snapshot payload");
+                return;
+            }
             snapshotService.replaceLogWithSnapshot(documentId, payload);
         } else {
             AppLog.warn("Unknown sync message prefix {} for document {}", prefix, documentId);
@@ -206,6 +233,32 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
             }
         }
         AppLog.debug("Delivered restore content for document {} live to {} connected session(s)", documentId, delivered);
+    }
+
+    /**
+     * The socket is the one write path that never goes through a controller, so the permission
+     * check has to live here. The level was resolved once during the handshake (see
+     * {@link WsHandshakeInterceptor}) - a missing attribute is treated as read-only, so a coding
+     * mistake elsewhere can only ever be too strict, never too permissive.
+     *
+     * <p>Awareness frames are deliberately not gated: a read-only collaborator still gets a
+     * visible cursor, which is the whole point of letting someone watch.</p>
+     */
+    private boolean mayWrite(WebSocketSession session) {
+        Object attribute = session.getAttributes().get(WsHandshakeInterceptor.ACCESS_LEVEL_ATTRIBUTE);
+        return attribute instanceof AccessLevel level && level.allows(Permission.WRITE);
+    }
+
+    private void refuseWrite(WebSocketSession session, UUID documentId, String what) {
+        AppLog.warn("Refused {} from read-only session {} on document {}", what, session.getId(), documentId);
+        if (!refusalAudited.add(session.getId())) {
+            return;
+        }
+        Object userId = session.getAttributes().get(WsHandshakeInterceptor.USER_ID_ATTRIBUTE);
+        documentRepository.findById(documentId).ifPresent(document ->
+                auditService.record(AuditEventType.ACCESS_DENIED, userId instanceof UUID id ? id : null,
+                        document.getVaultId(), documentId, document.getCurrentPath(), null,
+                        "refused " + what + " over the sync socket"));
     }
 
     private void broadcastToOthers(UUID documentId, WebSocketSession sender, byte[] raw) {

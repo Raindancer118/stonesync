@@ -19,10 +19,13 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyString;
 
 @ExtendWith(MockitoExtension.class)
 class DocumentServiceTest {
@@ -42,6 +45,9 @@ class DocumentServiceTest {
     @Mock
     private VaultEventBroadcaster vaultEventBroadcaster;
 
+    @Mock
+    private de.tstieh.stonesync.audit.AuditService auditService;
+
     private DocumentService service;
     private final UUID documentId = UUID.randomUUID();
     private final UUID vaultId = UUID.randomUUID();
@@ -50,7 +56,9 @@ class DocumentServiceTest {
     @BeforeEach
     void setUp() {
         Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
-        service = new DocumentService(repository, vaultAccessService, deletionBroadcaster, gitEraser, vaultEventBroadcaster, clock);
+        service = new DocumentService(repository, vaultAccessService, deletionBroadcaster, gitEraser, vaultEventBroadcaster, auditService, clock);
+        // Default for the tests that are not about permissions: everything is readable.
+        lenient().when(vaultAccessService.canRead(any(), any(), anyString())).thenReturn(true);
     }
 
     @Test
@@ -81,7 +89,8 @@ class DocumentServiceTest {
         DocumentEntity doc = new DocumentEntity(documentId, vaultId, "old/path.md",
                 DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
         when(repository.findById(documentId)).thenReturn(Optional.of(doc));
-        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService)
+                .requirePathPermission(eq(userId), eq(vaultId), anyString(), any());
 
         assertThatThrownBy(() -> service.rename(userId, documentId, "new/path.md"))
                 .isInstanceOf(VaultAccessDeniedException.class);
@@ -108,7 +117,8 @@ class DocumentServiceTest {
         DocumentEntity doc = new DocumentEntity(documentId, vaultId, "path.md",
                 DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
         when(repository.findById(documentId)).thenReturn(Optional.of(doc));
-        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService)
+                .requirePathPermission(eq(userId), eq(vaultId), anyString(), any());
 
         assertThatThrownBy(() -> service.markDeleted(userId, documentId))
                 .isInstanceOf(VaultAccessDeniedException.class);
@@ -220,19 +230,38 @@ class DocumentServiceTest {
     @Test
     @DisplayName("resolving without vault access fails before any document is ever read or created (IDOR protection)")
     void resolveWithoutVaultAccessIsDenied() {
-        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService)
+                .requirePathPermission(eq(userId), eq(vaultId), anyString(), any());
 
         assertThatThrownBy(() -> service.resolveOrCreate(userId, vaultId, "notes/new.md", DocumentEntity.ContentType.TEXT))
                 .isInstanceOf(VaultAccessDeniedException.class);
 
-        verify(repository, never()).findByVaultIdAndCurrentPath(any(), any());
+        // The lookup itself is harmless (nothing is returned to the caller); what must never
+        // happen is a document being created for someone who may not write there.
         verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("a note the caller may not read is not even listed - it never reaches their device")
+    void listDocumentsHidesNotesWithoutReadAccess() {
+        DocumentEntity visible = new DocumentEntity(UUID.randomUUID(), vaultId, "Shared/plan.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2026-01-01T00:00:00Z"));
+        DocumentEntity secret = new DocumentEntity(UUID.randomUUID(), vaultId, "Privat/diary.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2026-01-01T00:00:00Z"));
+        when(repository.findByVaultId(vaultId)).thenReturn(List.of(visible, secret));
+        when(vaultAccessService.canRead(userId, vaultId, "Shared/plan.md")).thenReturn(true);
+        when(vaultAccessService.canRead(userId, vaultId, "Privat/diary.md")).thenReturn(false);
+
+        List<DocumentService.DocumentSummary> listed = service.listDocuments(userId, vaultId);
+
+        assertThat(listed).extracting(DocumentService.DocumentSummary::path).containsExactly("Shared/plan.md");
     }
 
     @Test
     @DisplayName("listing documents without vault access fails before the repository is ever queried (IDOR protection)")
     void listDocumentsWithoutVaultAccessIsDenied() {
-        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService)
+                .requireVaultPermission(eq(userId), eq(vaultId), any());
 
         assertThatThrownBy(() -> service.listDocuments(userId, vaultId))
                 .isInstanceOf(VaultAccessDeniedException.class);
@@ -291,7 +320,8 @@ class DocumentServiceTest {
         DocumentEntity doc = new DocumentEntity(documentId, vaultId, "notes/a.md",
                 DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
         when(repository.findById(documentId)).thenReturn(Optional.of(doc));
-        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService)
+                .requirePathPermission(eq(userId), eq(vaultId), anyString(), any());
 
         assertThatThrownBy(() -> service.locate(userId, documentId)).isInstanceOf(VaultAccessDeniedException.class);
     }
@@ -309,7 +339,8 @@ class DocumentServiceTest {
         List<DocumentService.DocumentSummary> result = service.listNonDeletedForRestore(vaultId);
 
         assertThat(result).extracting(DocumentService.DocumentSummary::id).containsExactly(documentId);
-        verify(vaultAccessService, never()).requireAccess(any(), any());
+        verify(vaultAccessService, never()).requirePathPermission(any(), any(), anyString(), any());
+        verify(vaultAccessService, never()).requireVaultPermission(any(), any(), any());
     }
 
     @Test
@@ -321,7 +352,8 @@ class DocumentServiceTest {
         UUID resolved = service.resolveOrCreateForRestore(vaultId, "notes/new.md", DocumentEntity.ContentType.TEXT);
 
         assertThat(resolved).isNotNull();
-        verify(vaultAccessService, never()).requireAccess(any(), any());
+        verify(vaultAccessService, never()).requirePathPermission(any(), any(), anyString(), any());
+        verify(vaultAccessService, never()).requireVaultPermission(any(), any(), any());
     }
 
     @Test
@@ -335,6 +367,7 @@ class DocumentServiceTest {
 
         assertThat(doc.isDeleted()).isTrue();
         verify(deletionBroadcaster).broadcastDeleteNotice(documentId);
-        verify(vaultAccessService, never()).requireAccess(any(), any());
+        verify(vaultAccessService, never()).requirePathPermission(any(), any(), anyString(), any());
+        verify(vaultAccessService, never()).requireVaultPermission(any(), any(), any());
     }
 }

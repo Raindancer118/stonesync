@@ -1,5 +1,7 @@
 package de.tstieh.stonesync.auth;
 
+import de.tstieh.stonesync.access.AccessLevel;
+import de.tstieh.stonesync.access.Permission;
 import de.tstieh.stonesync.admin.VaultAccessDeniedException;
 import de.tstieh.stonesync.admin.VaultAccessService;
 import de.tstieh.stonesync.logging.AppLog;
@@ -30,6 +32,12 @@ import java.util.UUID;
 public class WsHandshakeInterceptor implements HandshakeInterceptor {
 
     public static final String USER_ID_ATTRIBUTE = "userId";
+    /**
+     * The caller's effective {@link AccessLevel} on this specific document, resolved once during
+     * the handshake and carried on the session - {@code DocumentSyncHandler} uses it to refuse
+     * document updates from a read-only collaborator without a database round trip per frame.
+     */
+    public static final String ACCESS_LEVEL_ATTRIBUTE = "accessLevel";
 
     private final TicketService ticketService;
     private final DocumentService documentService;
@@ -64,9 +72,13 @@ public class WsHandshakeInterceptor implements HandshakeInterceptor {
             return false;
         }
 
+        AccessLevel level;
         try {
-            UUID vaultId = documentService.vaultIdOf(documentId);
-            vaultAccessService.requireAccess(userId.get(), vaultId);
+            DocumentService.DocumentLocation location = documentService.locateUnchecked(documentId);
+            // Per note, not per vault: a path rule can hide this very document from someone who
+            // is otherwise a member of the vault, and then no socket may be opened for it at all.
+            vaultAccessService.requirePathPermission(userId.get(), location.vaultId(), location.path(), Permission.READ);
+            level = vaultAccessService.pathLevel(userId.get(), location.vaultId(), location.path());
         } catch (DocumentNotFoundException e) {
             AppLog.warn("Rejected WS handshake: unknown document {}", documentId);
             response.setStatusCode(HttpStatus.NOT_FOUND);
@@ -78,7 +90,8 @@ public class WsHandshakeInterceptor implements HandshakeInterceptor {
         }
 
         attributes.put(USER_ID_ATTRIBUTE, userId.get());
-        AppLog.debug("Accepted WS handshake for user {} on document {}", userId.get(), documentId);
+        attributes.put(ACCESS_LEVEL_ATTRIBUTE, level);
+        AppLog.debug("Accepted WS handshake for user {} on document {} with level {}", userId.get(), documentId, level);
         return true;
     }
 

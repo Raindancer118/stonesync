@@ -1,5 +1,7 @@
 package de.tstieh.stonesync.admin;
 
+import de.tstieh.stonesync.audit.AuditEventType;
+import de.tstieh.stonesync.audit.AuditService;
 import de.tstieh.stonesync.auth.ApiKeyEntity;
 import de.tstieh.stonesync.auth.ApiKeyHasher;
 import de.tstieh.stonesync.auth.ApiKeyRepository;
@@ -31,17 +33,20 @@ public class AdminService {
     private final ApiKeyRepository apiKeyRepository;
     private final DocumentRepository documentRepository;
     private final ApiKeyHasher apiKeyHasher;
+    private final AuditService auditService;
     private final Clock clock;
 
     public AdminService(UserRepository userRepository, VaultRepository vaultRepository,
                          UserVaultAccessRepository accessRepository, ApiKeyRepository apiKeyRepository,
-                         DocumentRepository documentRepository, ApiKeyHasher apiKeyHasher, Clock clock) {
+                         DocumentRepository documentRepository, ApiKeyHasher apiKeyHasher,
+                         AuditService auditService, Clock clock) {
         this.userRepository = userRepository;
         this.vaultRepository = vaultRepository;
         this.accessRepository = accessRepository;
         this.apiKeyRepository = apiKeyRepository;
         this.documentRepository = documentRepository;
         this.apiKeyHasher = apiKeyHasher;
+        this.auditService = auditService;
         this.clock = clock;
     }
 
@@ -75,16 +80,40 @@ public class AdminService {
 
     @Transactional
     public void grantAccess(UUID userId, UUID vaultId, VaultRole role) {
+        grantAccess(userId, vaultId, role, null);
+    }
+
+    /** @param actorId who performed the change, for the audit trail ({@code null} = admin key/system). */
+    @Transactional
+    public void grantAccess(UUID userId, UUID vaultId, VaultRole role, UUID actorId) {
         accessRepository.findByUserIdAndVaultId(userId, vaultId)
                 .ifPresentOrElse(
                         existing -> {
+                            VaultRole previous = existing.getRole();
                             existing.changeRole(role);
+                            auditService.recordAccessChange(AuditEventType.ACCESS_ROLE_CHANGED, actorId, vaultId, userId,
+                                    previous + " -> " + role);
                             AppLog.info("Changed user {} to role {} on vault {}", userId, role, vaultId);
                         },
                         () -> {
                             accessRepository.save(new UserVaultAccessEntity(UUID.randomUUID(), userId, vaultId, role));
+                            auditService.recordAccessChange(AuditEventType.ACCESS_GRANTED, actorId, vaultId, userId,
+                                    role.name());
                             AppLog.info("Granted user {} role {} on vault {}", userId, role, vaultId);
                         });
+    }
+
+    /** Promotes/demotes an account-wide {@link SystemRole}. */
+    @Transactional
+    public void changeSystemRole(UUID userId, SystemRole role, UUID actorId) {
+        UserEntity user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown user: " + userId));
+        SystemRole previous = user.getSystemRole();
+        user.changeSystemRole(role);
+        userRepository.save(user);
+        auditService.recordAccessChange(AuditEventType.SYSTEM_ROLE_CHANGED, actorId, null, userId,
+                previous + " -> " + role);
+        AppLog.info("Changed system role of user {} from {} to {}", userId, previous, role);
     }
 
     /** Creates a new API key/device for a user. Returns the raw key - shown to the caller only once. */
@@ -119,9 +148,17 @@ public class AdminService {
     /** Idempotent: removing a grant that doesn't exist is a no-op, matching DELETE semantics. */
     @Transactional
     public void revokeAccess(UUID userId, UUID vaultId) {
+        revokeAccess(userId, vaultId, null);
+    }
+
+    /** @param actorId who performed the change, for the audit trail ({@code null} = admin key/system). */
+    @Transactional
+    public void revokeAccess(UUID userId, UUID vaultId, UUID actorId) {
         Optional<UserVaultAccessEntity> access = accessRepository.findByUserIdAndVaultId(userId, vaultId);
         if (access.isPresent()) {
             accessRepository.delete(access.get());
+            auditService.recordAccessChange(AuditEventType.ACCESS_REVOKED, actorId, vaultId, userId,
+                    access.get().getRole().name());
             AppLog.info("Revoked user {}'s access to vault {}", userId, vaultId);
         } else {
             AppLog.debug("No-op: user {} already had no access to vault {}", userId, vaultId);

@@ -32,6 +32,9 @@ class MaterializeServiceTest {
     private VaultGitRepository gitRepository;
 
     private MaterializeService service;
+    @org.mockito.Mock
+    private de.tstieh.stonesync.audit.AuditService auditService;
+
     private final UUID userId = UUID.randomUUID();
     private final UUID documentId = UUID.randomUUID();
     private final UUID vaultId = UUID.randomUUID();
@@ -39,14 +42,14 @@ class MaterializeServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new MaterializeService(documentService, userRepository, gitRepository,
+        service = new MaterializeService(documentService, userRepository, gitRepository, auditService,
                 Clock.fixed(now, ZoneOffset.UTC));
     }
 
     @Test
     @DisplayName("materialize resolves the document's vault/path and writes+commits it under the author's email")
     void materializeWritesAndCommits() {
-        when(documentService.locate(userId, documentId))
+        when(documentService.locateForWrite(userId, documentId))
                 .thenReturn(new DocumentService.DocumentLocation(vaultId, "notes/a.md"));
         when(userRepository.findById(userId))
                 .thenReturn(Optional.of(new UserEntity(userId, "tom@example.com", "hash", now)));
@@ -60,7 +63,7 @@ class MaterializeServiceTest {
     @Test
     @DisplayName("materialize falls back to a placeholder author when the user can't be found")
     void materializeFallsBackToUnknownAuthor() {
-        when(documentService.locate(userId, documentId))
+        when(documentService.locateForWrite(userId, documentId))
                 .thenReturn(new DocumentService.DocumentLocation(vaultId, "notes/a.md"));
         when(userRepository.findById(userId)).thenReturn(Optional.empty());
 

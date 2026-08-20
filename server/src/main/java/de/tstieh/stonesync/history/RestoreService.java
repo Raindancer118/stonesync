@@ -1,5 +1,6 @@
 package de.tstieh.stonesync.history;
 
+import de.tstieh.stonesync.access.Permission;
 import de.tstieh.stonesync.admin.VaultAccessService;
 import de.tstieh.stonesync.logging.AppLog;
 import de.tstieh.stonesync.sync.DocumentEntity;
@@ -44,12 +45,14 @@ public class RestoreService {
     }
 
     public List<GitLogEntry> log(UUID userId, UUID vaultId) {
-        vaultAccessService.requireAccess(userId, vaultId);
+        // The vault-wide log spans every note, including ones a path rule hides, so it is owner
+        // material - not something a plain member gets to read.
+        vaultAccessService.requireVaultPermission(userId, vaultId, Permission.MANAGE_VAULT);
         return gitRepository.log(vaultId);
     }
 
     public RestoreResult restore(UUID userId, UUID vaultId, String commitIsh) {
-        vaultAccessService.requireAccess(userId, vaultId);
+        vaultAccessService.requireVaultPermission(userId, vaultId, Permission.MANAGE_VAULT);
         AppLog.warn("User {} is restoring vault {} to commit '{}' - this may tombstone documents", userId, vaultId, commitIsh);
 
         Map<String, String> targetFiles = gitRepository.readTreeAtCommit(vaultId, commitIsh);
