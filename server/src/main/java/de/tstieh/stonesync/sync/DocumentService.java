@@ -25,14 +25,17 @@ public class DocumentService {
     private final VaultAccessService vaultAccessService;
     private final DocumentDeletionBroadcaster deletionBroadcaster;
     private final DocumentGitEraser gitEraser;
+    private final VaultEventBroadcaster vaultEventBroadcaster;
     private final Clock clock;
 
     public DocumentService(DocumentRepository repository, VaultAccessService vaultAccessService,
-                            DocumentDeletionBroadcaster deletionBroadcaster, DocumentGitEraser gitEraser, Clock clock) {
+                            DocumentDeletionBroadcaster deletionBroadcaster, DocumentGitEraser gitEraser,
+                            VaultEventBroadcaster vaultEventBroadcaster, Clock clock) {
         this.repository = repository;
         this.vaultAccessService = vaultAccessService;
         this.deletionBroadcaster = deletionBroadcaster;
         this.gitEraser = gitEraser;
+        this.vaultEventBroadcaster = vaultEventBroadcaster;
         this.clock = clock;
     }
 
@@ -47,8 +50,18 @@ public class DocumentService {
         AppLog.info("Renamed document {} from '{}' to '{}'", documentId, oldPath, newPath);
     }
 
-    @Transactional
     public void markDeleted(UUID userId, UUID documentId) {
+        markDeleted(userId, documentId, null);
+    }
+
+    /**
+     * @param originSessionId opaque per-plugin-instance id the calling client sent along (see
+     *                        {@code DocumentController#delete}), echoed back in the vault-events
+     *                        broadcast so that SAME client can recognize and ignore its own event
+     *                        instead of missing others while paused (see {@link VaultEventBroadcaster}).
+     */
+    @Transactional
+    public void markDeleted(UUID userId, UUID documentId, String originSessionId) {
         DocumentEntity document = repository.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
         vaultAccessService.requireAccess(userId, document.getVaultId());
@@ -58,6 +71,7 @@ public class DocumentService {
         // A real, user-initiated delete - unlike markDeletedForRestore, this must also erase the
         // document from git history, or a later restore would resurrect it (see DocumentGitEraser).
         gitEraser.removeFromGit(document.getVaultId(), document.getCurrentPath());
+        vaultEventBroadcaster.notifyDocumentDeleted(document.getVaultId(), documentId, document.getCurrentPath(), originSessionId);
         AppLog.info("Deleted document {} ('{}') by user {}", documentId, document.getCurrentPath(), userId);
     }
 
@@ -66,8 +80,18 @@ public class DocumentService {
      * if none exists yet. Called by clients before they open the Yjs sync channel or upload
      * an attachment - they only ever know the vault-relative path, never the UUID up front.
      */
-    @Transactional
     public UUID resolveOrCreate(UUID userId, UUID vaultId, String path, DocumentEntity.ContentType contentType) {
+        return resolveOrCreate(userId, vaultId, path, contentType, null);
+    }
+
+    /**
+     * @param originSessionId opaque per-plugin-instance id the calling client sent along (see
+     *                        {@code DocumentController#resolve}), echoed back in the vault-events
+     *                        broadcast - see {@link #markDeleted(UUID, UUID, String)}.
+     */
+    @Transactional
+    public UUID resolveOrCreate(UUID userId, UUID vaultId, String path, DocumentEntity.ContentType contentType,
+                                 String originSessionId) {
         vaultAccessService.requireAccess(userId, vaultId);
         return repository.findByVaultIdAndCurrentPath(vaultId, path)
                 .map(existing -> {
@@ -77,6 +101,7 @@ public class DocumentService {
                 .orElseGet(() -> {
                     DocumentEntity created = new DocumentEntity(UUID.randomUUID(), vaultId, path, contentType, clock.instant());
                     repository.save(created);
+                    vaultEventBroadcaster.notifyDocumentCreated(vaultId, created.getId(), path, contentType, originSessionId);
                     AppLog.info("Created new document {} for '{}' in vault {}", created.getId(), path, vaultId);
                     return created.getId();
                 });

@@ -39,6 +39,9 @@ class DocumentServiceTest {
     @Mock
     private DocumentGitEraser gitEraser;
 
+    @Mock
+    private VaultEventBroadcaster vaultEventBroadcaster;
+
     private DocumentService service;
     private final UUID documentId = UUID.randomUUID();
     private final UUID vaultId = UUID.randomUUID();
@@ -47,7 +50,7 @@ class DocumentServiceTest {
     @BeforeEach
     void setUp() {
         Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
-        service = new DocumentService(repository, vaultAccessService, deletionBroadcaster, gitEraser, clock);
+        service = new DocumentService(repository, vaultAccessService, deletionBroadcaster, gitEraser, vaultEventBroadcaster, clock);
     }
 
     @Test
@@ -147,6 +150,41 @@ class DocumentServiceTest {
         service.markDeletedForRestore(documentId);
 
         verify(gitEraser, never()).removeFromGit(any(), any());
+    }
+
+    @Test
+    @DisplayName("resolving an unknown (vaultId, path) broadcasts a vault-wide document_created event")
+    void resolveCreatingNewDocumentBroadcastsCreatedEvent() {
+        when(repository.findByVaultIdAndCurrentPath(vaultId, "notes/new.md")).thenReturn(Optional.empty());
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        UUID resolved = service.resolveOrCreate(userId, vaultId, "notes/new.md", DocumentEntity.ContentType.TEXT, "session-abc");
+
+        verify(vaultEventBroadcaster).notifyDocumentCreated(vaultId, resolved, "notes/new.md", DocumentEntity.ContentType.TEXT, "session-abc");
+    }
+
+    @Test
+    @DisplayName("resolving a known (vaultId, path) does NOT broadcast a document_created event")
+    void resolveExistingDocumentDoesNotBroadcastCreatedEvent() {
+        DocumentEntity existing = new DocumentEntity(documentId, vaultId, "notes/a.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
+        when(repository.findByVaultIdAndCurrentPath(vaultId, "notes/a.md")).thenReturn(Optional.of(existing));
+
+        service.resolveOrCreate(userId, vaultId, "notes/a.md", DocumentEntity.ContentType.TEXT);
+
+        verify(vaultEventBroadcaster, never()).notifyDocumentCreated(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("deleting broadcasts a vault-wide document_deleted event")
+    void deleteBroadcastsDocumentDeletedEvent() {
+        DocumentEntity doc = new DocumentEntity(documentId, vaultId, "path.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
+        when(repository.findById(documentId)).thenReturn(Optional.of(doc));
+
+        service.markDeleted(userId, documentId, "session-abc");
+
+        verify(vaultEventBroadcaster).notifyDocumentDeleted(vaultId, documentId, "path.md", "session-abc");
     }
 
     @Test

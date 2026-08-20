@@ -1,4 +1,5 @@
 import { requestUrl } from "obsidian";
+import { getClientSessionId } from "../net/clientSession";
 
 /**
  * Tombstones a document server-side (`DELETE /api/documents/{id}`, `DocumentController#delete`),
@@ -12,6 +13,7 @@ export async function deleteDocument(serverUrl: string, apiKey: string, document
 		method: "DELETE",
 		headers: {
 			Authorization: `Bearer ${apiKey}`,
+			"X-StoneSync-Session": getClientSessionId(),
 		},
 		throw: false,
 	});

@@ -6,6 +6,7 @@ import type { ConnectionStatus } from "./net/StoneSyncSocket";
 import { AttachmentSync } from "./attachments/AttachmentSync";
 import { VaultDownloadService } from "./sync/VaultDownloadService";
 import { VaultUploadService } from "./sync/VaultUploadService";
+import { VaultEventsManager } from "./sync/VaultEventsManager";
 import { createSyncExtension } from "./editor/syncExtension";
 import { parseConnectParams } from "./onboarding/DeepLinkHandler";
 import { exchangeCode } from "./onboarding/ApiKeyExchangeClient";
@@ -58,6 +59,7 @@ function describeStatus(status: ConnectionStatus | null): { label: string; cssCl
 export default class StoneSyncPlugin extends Plugin {
 	settings: StoneSyncSettings = DEFAULT_SETTINGS;
 	private syncManager: SyncManager | null = null;
+	private vaultEventsManager: VaultEventsManager | null = null;
 	private statusBarItemEl: HTMLElement | null = null;
 
 	async onload(): Promise<void> {
@@ -69,6 +71,8 @@ export default class StoneSyncPlugin extends Plugin {
 
 		const userName = this.settings.displayName;
 		this.syncManager = new SyncManager(this.app, () => this.settings, userName, pickUserColor(userName));
+		this.vaultEventsManager = new VaultEventsManager(this.app, () => this.settings, userName, pickUserColor(userName));
+		this.vaultEventsManager.start();
 
 		this.registerEditorExtension(createSyncExtension());
 
@@ -146,11 +150,21 @@ export default class StoneSyncPlugin extends Plugin {
 	onunload(): void {
 		this.syncManager?.setStatusListener(null);
 		this.syncManager?.teardownAll();
+		this.vaultEventsManager?.stop();
 	}
 
 	private updateStatusBar(status: ConnectionStatus | null): void {
-		if (!this.statusBarItemEl) return;
 		const { label, cssClass } = describeStatus(status);
+		this.renderStatusBar(label, cssClass);
+	}
+
+	/** Used while a bulk download/upload runs, since that has no `ConnectionStatus` of its own. */
+	private setStatusBarBusy(label: string): void {
+		this.renderStatusBar(label, "connecting");
+	}
+
+	private renderStatusBar(label: string, cssClass: string): void {
+		if (!this.statusBarItemEl) return;
 		this.statusBarItemEl.empty();
 		this.statusBarItemEl.createSpan({ cls: `stonesync-status-dot stonesync-status-dot--${cssClass}` });
 		this.statusBarItemEl.createSpan({ text: `StoneSync: ${label}`, cls: "stonesync-status-text" });
@@ -197,6 +211,7 @@ export default class StoneSyncPlugin extends Plugin {
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 		this.syncManager?.reconfigure();
+		this.vaultEventsManager?.start();
 	}
 
 	/**
@@ -244,8 +259,13 @@ export default class StoneSyncPlugin extends Plugin {
 			settings: this.settings,
 			userName: this.settings.displayName,
 			userColor: pickUserColor(this.settings.displayName),
+			onProgress: (processed, total) => this.setStatusBarBusy(`downloading ${processed}/${total}`),
 		});
-		await service.downloadEntireVault();
+		try {
+			await service.downloadEntireVault();
+		} finally {
+			void this.syncManager?.onActiveLeafChange();
+		}
 	}
 
 	/**
@@ -264,8 +284,13 @@ export default class StoneSyncPlugin extends Plugin {
 			settings: this.settings,
 			userName: this.settings.displayName,
 			userColor: pickUserColor(this.settings.displayName),
+			onProgress: (processed, total) => this.setStatusBarBusy(`uploading ${processed}/${total}`),
 		});
-		await service.uploadEntireVault();
+		try {
+			await service.uploadEntireVault();
+		} finally {
+			void this.syncManager?.onActiveLeafChange();
+		}
 	}
 
 	/** Synchronizes a single attachment (e.g. callable from a context menu entry). */

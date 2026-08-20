@@ -3,8 +3,6 @@ package de.tstieh.stonesync.auth;
 import de.tstieh.stonesync.admin.VaultAccessDeniedException;
 import de.tstieh.stonesync.admin.VaultAccessService;
 import de.tstieh.stonesync.logging.AppLog;
-import de.tstieh.stonesync.sync.DocumentNotFoundException;
-import de.tstieh.stonesync.sync.DocumentService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
@@ -17,28 +15,20 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Validates the one-time ticket passed as a {@code ?ticket=} query parameter during the
- * WebSocket handshake and consumes it immediately. Obsidian's WebSocket client cannot set
- * custom headers, so this is the only place authentication can happen for the sync channel.
- *
- * <p>A valid ticket only proves who the caller is - it says nothing about whether they may
- * access the {@code documentId} in the handshake URL. This also resolves that document's
- * vault and enforces {@link VaultAccessService#requireAccess}, closing what would otherwise
- * be an IDOR: any authenticated user could sync any document by guessing its UUID.</p>
+ * Same one-time-ticket handshake as {@link WsHandshakeInterceptor}, but for the vault-events
+ * channel ({@code /ws/vault/{vaultId}}): the path segment is already the vaultId itself, so no
+ * document lookup is needed before the {@link VaultAccessService#requireAccess} check.
  */
 @Component
-public class WsHandshakeInterceptor implements HandshakeInterceptor {
+public class VaultWsHandshakeInterceptor implements HandshakeInterceptor {
 
     public static final String USER_ID_ATTRIBUTE = "userId";
 
     private final TicketService ticketService;
-    private final DocumentService documentService;
     private final VaultAccessService vaultAccessService;
 
-    public WsHandshakeInterceptor(TicketService ticketService, DocumentService documentService,
-                                   VaultAccessService vaultAccessService) {
+    public VaultWsHandshakeInterceptor(TicketService ticketService, VaultAccessService vaultAccessService) {
         this.ticketService = ticketService;
-        this.documentService = documentService;
         this.vaultAccessService = vaultAccessService;
     }
 
@@ -47,7 +37,7 @@ public class WsHandshakeInterceptor implements HandshakeInterceptor {
                                     WebSocketHandler wsHandler, Map<String, Object> attributes) {
         Optional<UUID> ticket = WsHandshakeSupport.extractTicket(request);
         if (ticket.isEmpty()) {
-            AppLog.warn("Rejected WS handshake: no ticket in query string ({})", request.getURI());
+            AppLog.warn("Rejected vault-events WS handshake: no ticket in query string ({})", request.getURI());
             response.setStatusCode(HttpStatus.UNAUTHORIZED);
             return false;
         }
@@ -57,28 +47,23 @@ public class WsHandshakeInterceptor implements HandshakeInterceptor {
             return false;
         }
 
-        UUID documentId = WsHandshakeSupport.extractLastPathSegmentAsUuid(request);
-        if (documentId == null) {
-            AppLog.warn("Rejected WS handshake: no valid documentId in path ({})", request.getURI());
+        UUID vaultId = WsHandshakeSupport.extractLastPathSegmentAsUuid(request);
+        if (vaultId == null) {
+            AppLog.warn("Rejected vault-events WS handshake: no valid vaultId in path ({})", request.getURI());
             response.setStatusCode(HttpStatus.BAD_REQUEST);
             return false;
         }
 
         try {
-            UUID vaultId = documentService.vaultIdOf(documentId);
             vaultAccessService.requireAccess(userId.get(), vaultId);
-        } catch (DocumentNotFoundException e) {
-            AppLog.warn("Rejected WS handshake: unknown document {}", documentId);
-            response.setStatusCode(HttpStatus.NOT_FOUND);
-            return false;
         } catch (VaultAccessDeniedException e) {
-            AppLog.warn("Rejected WS handshake: user {} has no access to document {}", userId.get(), documentId);
+            AppLog.warn("Rejected vault-events WS handshake: user {} has no access to vault {}", userId.get(), vaultId);
             response.setStatusCode(HttpStatus.FORBIDDEN);
             return false;
         }
 
         attributes.put(USER_ID_ATTRIBUTE, userId.get());
-        AppLog.debug("Accepted WS handshake for user {} on document {}", userId.get(), documentId);
+        AppLog.debug("Accepted vault-events WS handshake for user {} on vault {}", userId.get(), vaultId);
         return true;
     }
 

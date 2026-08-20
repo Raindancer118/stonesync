@@ -1,4 +1,5 @@
 import { requestUrl } from "obsidian";
+import { getClientSessionId } from "../net/clientSession";
 
 /**
  * Resolves the server-side document UUID (`documents.id`) for a
@@ -33,6 +34,7 @@ export class DocumentIdResolver {
 			headers: {
 				Authorization: `Bearer ${this.apiKey}`,
 				"Content-Type": "application/json",
+				"X-StoneSync-Session": getClientSessionId(),
 			},
 			body: JSON.stringify({ vaultId: this.vaultId, path: vaultRelativePath, contentType }),
 			throw: false,

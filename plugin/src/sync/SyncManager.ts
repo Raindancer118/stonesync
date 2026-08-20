@@ -199,13 +199,22 @@ export class SyncManager {
 
 	/**
 	 * Reacts to the server telling us (via DELETE_NOTICE) that this document was deleted
-	 * elsewhere. Removes the local file and tears the session down - mirrors what
+	 * elsewhere. Tears the session down and removes the local file - mirrors what
 	 * `handleDelete` does for a *locally* initiated delete, just triggered from the opposite
 	 * direction. Uses the path captured at session-creation time rather than looking it up
 	 * again, since by the time this fires the file may already be gone locally too (e.g. if
 	 * the user deleted it here as well, in a race with another device's delete).
+	 *
+	 * If this happens to be the file the user currently has open, the local content is kept
+	 * instead of being pulled out from under an active editor (found via agy architecture
+	 * review, same reasoning as `VaultEventsManager`'s delete reaction) - the live sync session
+	 * still tears down either way, since the document is tombstoned server-side regardless.
+	 * Uses Obsidian's trash rather than a hard filesystem delete, so an unlucky race is still
+	 * recoverable.
 	 */
 	private async handleRemoteDeleteNotice(path: string): Promise<void> {
+		const wasActiveFile = this.app.workspace.getActiveFile()?.path === path;
+
 		if (this.currentBoundPath === path) {
 			this.unbindCurrent();
 		} else {
@@ -217,9 +226,18 @@ export class SyncManager {
 		}
 		this.resolver?.forget(path);
 
+		if (wasActiveFile) {
+			new Notice(
+				`StoneSync: A collaborator deleted "${path}", but it's kept since you have it open. ` +
+					"Close it and delete manually if you agree it should go."
+			);
+			return;
+		}
+
 		try {
-			if (await this.app.vault.adapter.exists(path)) {
-				await this.app.vault.adapter.remove(path);
+			const file = this.app.vault.getAbstractFileByPath(path);
+			if (file) {
+				await this.app.vault.trash(file, true);
 			}
 		} catch (error) {
 			console.error("[StoneSync] Failed to remove locally deleted file", path, error);

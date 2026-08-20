@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -29,6 +30,13 @@ import java.util.UUID;
 @RequestMapping("/api/documents")
 public class DocumentController {
 
+    /**
+     * Opaque, client-chosen id (one per plugin instance/device) that lets the vault-events
+     * channel tell a client apart from its own actions - see {@link VaultEventBroadcaster}.
+     * Optional: absent for callers that don't care about self-echo filtering.
+     */
+    public static final String SESSION_HEADER = "X-StoneSync-Session";
+
     private final DocumentService documentService;
 
     public DocumentController(DocumentService documentService) {
@@ -42,9 +50,11 @@ public class DocumentController {
     }
 
     @PostMapping("/resolve")
-    public ResolveResponse resolve(@RequestBody ResolveRequest request, Authentication authentication) {
+    public ResolveResponse resolve(@RequestBody ResolveRequest request,
+                                    @RequestHeader(value = SESSION_HEADER, required = false) String sessionId,
+                                    Authentication authentication) {
         UUID userId = (UUID) authentication.getPrincipal();
-        UUID documentId = documentService.resolveOrCreate(userId, request.vaultId(), request.path(), request.contentType());
+        UUID documentId = documentService.resolveOrCreate(userId, request.vaultId(), request.path(), request.contentType(), sessionId);
         return new ResolveResponse(documentId);
     }
 
@@ -57,9 +67,11 @@ public class DocumentController {
     }
 
     @DeleteMapping("/{documentId}")
-    public ResponseEntity<Void> delete(@PathVariable UUID documentId, Authentication authentication) {
+    public ResponseEntity<Void> delete(@PathVariable UUID documentId,
+                                        @RequestHeader(value = SESSION_HEADER, required = false) String sessionId,
+                                        Authentication authentication) {
         UUID userId = (UUID) authentication.getPrincipal();
-        documentService.markDeleted(userId, documentId);
+        documentService.markDeleted(userId, documentId, sessionId);
         return ResponseEntity.noContent().build();
     }
 

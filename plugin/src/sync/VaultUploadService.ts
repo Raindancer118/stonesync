@@ -10,6 +10,8 @@ export interface VaultUploadOptions {
 	settings: StoneSyncSettings;
 	userName: string;
 	userColor: string;
+	/** Fired after every file is processed - drives UI other than the periodic Notice (e.g. the status bar). */
+	onProgress?: (processed: number, total: number) => void;
 }
 
 /**
@@ -114,6 +116,7 @@ export class VaultUploadService {
 
 	private reportProgress(uploaded: number, skipped: number, failed: number, total: number): void {
 		const processed = uploaded + skipped + failed;
+		this.options.onProgress?.(processed, total);
 		if (processed % 10 === 0 || processed === total) {
 			new Notice(`StoneSync: ${processed}/${total} files processed (${uploaded} uploaded, ${skipped} skipped).`);
 		}
