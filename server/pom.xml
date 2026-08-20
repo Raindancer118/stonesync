@@ -17,6 +17,16 @@
     <name>stonesync-server</name>
     <description>StoneSync backend - Yjs relay/persistence server for the StoneSync Obsidian plugin</description>
 
+
+    <licenses>
+        <license>
+            <name>Proprietary</name>
+            <url>https://github.com/Raindancer118/stonesync/blob/main/LICENSE</url>
+            <distribution>manual</distribution>
+            <comments>All rights reserved. Commercial license required for production use.</comments>
+        </license>
+    </licenses>
+
     <properties>
         <java.version>21</java.version>
         <maven.compiler.release>21</maven.compiler.release>

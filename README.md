@@ -8,7 +8,7 @@ Multiple people editing the same vault, at the same time, with live cursors —
 no cloud subscription, no vendor lock-in, self-hosted on hardware you control.
 
 [![CI](https://github.com/Raindancer118/stonesync/actions/workflows/ci.yml/badge.svg)](https://github.com/Raindancer118/stonesync/actions/workflows/ci.yml)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 [![Java 21](https://img.shields.io/badge/server-Java%2021%20%2F%20Spring%20Boot-orange)](server)
 [![Obsidian Plugin](https://img.shields.io/badge/plugin-TypeScript%20%2F%20Yjs-8a2be2)](plugin)
 
@@ -129,5 +129,10 @@ part of this release yet.
 
 ## License
 
-[AGPL-3.0](LICENSE) — if you run a modified version of this server as a
-network service, its source must remain available to its users.
+**Proprietary** — see [LICENSE](LICENSE). The source is readable for evaluation and
+security review; production use, redistribution and resale require a written
+commercial license (tom560stieh@gmail.com). Third-party components keep their own
+licenses, listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+Versions released before 20 August 2026 were published under AGPL-3.0 and stay
+AGPL-3.0 for anyone who obtained them.

@@ -19,7 +19,7 @@
     "yjs"
   ],
   "author": "Raindancer118",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "devDependencies": {
     "@types/node": "^22.10.5",
     "builtin-modules": "^4.0.0",
@@ -40,5 +40,6 @@
   "allowScripts": {
     "esbuild@0.24.2": true,
     "esbuild@0.21.5": true
-  }
+  },
+  "private": true
 }
