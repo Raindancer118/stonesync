@@ -108,6 +108,35 @@ The end-to-end suite drives two real clients against a running server: edits in 
 directions, live cursor presence appearing and disappearing, and a late joiner catching up
 on the full history.
 
+## Who may see and change what
+
+Permissions are enforced on every path content can travel, and a note someone may not read is
+never handed to them in the first place - it is not listed, not downloaded, no sync socket is
+opened for it, and they are not even told when it changes.
+
+| | VIEWER | EDITOR | OWNER | ADMIN |
+|---|---|---|---|---|
+| Read notes | ✓ | ✓ | ✓ | every vault |
+| Edit, create, rename, delete | | ✓ | ✓ | ✓ |
+| Manage members, invites, folder rules | | | ✓ | ✓ |
+| Vault history and restore | | | ✓ | ✓ |
+
+**Folder rules** scope that further: a rule on a folder (or a single note) overrides the role for
+that subtree - `none` hides it completely, or a read-only member can be made an editor in just
+one folder. The most specific rule wins; a rule for one person beats the everyone-rule. A blanket
+rule never locks the vault owner out of their own vault.
+
+Revoking access takes effect immediately: open editors switch to read-only, and any note that
+just became invisible is removed from that person's device (into Obsidian's trash, so an accident
+is recoverable).
+
+Everything is auditable - permission changes, content changes and refused attempts - via
+`ss-audit`, and per note "who changed this, when, and what exactly" via the note history (backed
+by the vault's git history, with the real author on each commit).
+
+Owners manage all of this from inside Obsidian (*Manage collaborators and folder rules*) or from
+the server console (`ss-access`, `ss-rule-set`, `ss-audit`, `ss-file-history`).
+
 ## What "live" means here
 
 * Every **open** Markdown editor gets its own sync session - not just the focused pane, so a

@@ -1,4 +1,5 @@
-import { Compartment, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import { yCollab } from "y-codemirror.next";
 import type { DocumentSession } from "../sync/DocumentSession";
 
@@ -21,8 +22,16 @@ export function createSyncExtension(): Extension {
  * from the awareness state) for a specific file. `yCollab` from
  * `y-codemirror.next` handles both in a single extension.
  */
-export function buildCollabExtension(session: DocumentSession): Extension {
-	return yCollab(session.ytext, session.awareness, { undoManager: false });
+export function buildCollabExtension(session: DocumentSession, readOnly = false): Extension {
+	const collab = yCollab(session.ytext, session.awareness, { undoManager: false });
+	if (!readOnly) {
+		return collab;
+	}
+	// A read-only collaborator still gets the full live experience - remote edits and cursors
+	// keep flowing in - they just cannot type. Both flags are needed: `readOnly` blocks
+	// programmatic/user transactions, `editable` also stops the caret and drag-and-drop, so the
+	// editor visibly behaves like a viewer instead of silently discarding keystrokes.
+	return [collab, EditorState.readOnly.of(true), EditorView.editable.of(false)];
 }
 
 /** Empty extension, used to reset the compartment when leaving a synchronized document. */

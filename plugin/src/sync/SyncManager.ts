@@ -5,6 +5,8 @@ import { DocumentIdResolver } from "./DocumentIdResolver";
 import { deleteDocument } from "./DocumentDeleteClient";
 import { syncCompartment, buildCollabExtension, emptyExtension } from "../editor/syncExtension";
 import { decideReconciliation } from "./reconcile";
+import { PermissionsClient } from "../access/PermissionsClient";
+import { canWrite, canRead, effectiveLevel, UNKNOWN_PERMISSIONS, type AccessLevel, type VaultPermissions } from "../access/permissions";
 import type { StoneSyncSettings } from "../settings/StoneSyncSettings";
 import { isConfigured } from "../settings/StoneSyncSettings";
 import type { ConnectionStatus } from "../net/StoneSyncSocket";
@@ -40,6 +42,8 @@ export class SyncManager {
 	private statusListener: ((status: ConnectionStatus | null) => void) | null = null;
 	private presenceListener: ((peers: Peer[]) => void) | null = null;
 	private unsubscribePresence: (() => void) | null = null;
+	private permissions: VaultPermissions = UNKNOWN_PERMISSIONS;
+	private permissionsListener: ((permissions: VaultPermissions, level: AccessLevel | null) => void) | null = null;
 
 	constructor(
 		private readonly app: App,
@@ -67,11 +71,49 @@ export class SyncManager {
 		this.presenceListener = listener;
 	}
 
+	/**
+	 * Registers a callback for the caller's own permissions (vault-wide, plus the level for the
+	 * note currently active) - drives the role shown in the status bar.
+	 */
+	setPermissionsListener(listener: ((permissions: VaultPermissions, level: AccessLevel | null) => void) | null): void {
+		this.permissionsListener = listener;
+	}
+
+	getPermissions(): VaultPermissions {
+		return this.permissions;
+	}
+
 	/** Call after settings changes (server URL, API key, vault ID). */
 	reconfigure(): void {
 		this.resolver = null;
 		this.shownUnauthorizedNotice = false;
+		this.permissions = UNKNOWN_PERMISSIONS;
 		this.teardownAll();
+	}
+
+	/**
+	 * Re-reads what this user may do from the server. Called on start, after settings changes,
+	 * and whenever the server signals that access changed - a role or rule change has to reach an
+	 * already-open editor, not just the next session.
+	 */
+	async refreshPermissions(): Promise<VaultPermissions> {
+		const settings = this.getSettings();
+		if (!isConfigured(settings)) return this.permissions;
+		try {
+			const client = new PermissionsClient(settings.serverUrl, settings.apiKey, settings.vaultId);
+			this.permissions = await client.permissions();
+		} catch (error) {
+			// Optimistic fallback (see UNKNOWN_PERMISSIONS): the server still refuses writes it
+			// should refuse, so a failed lookup must not lock a legitimate editor out.
+			console.error("[StoneSync] Failed to load permissions", error);
+		}
+		this.emitPermissions();
+		return this.permissions;
+	}
+
+	private emitPermissions(): void {
+		const activePath = this.app.workspace.getActiveFile()?.path ?? null;
+		this.permissionsListener?.(this.permissions, activePath ? effectiveLevel(this.permissions, activePath) : null);
 	}
 
 	private getResolver(): DocumentIdResolver {
@@ -120,7 +162,24 @@ export class SyncManager {
 	async onActiveLeafChange(): Promise<void> {
 		const settings = this.getSettings();
 		if (!settings.syncEnabled || !isConfigured(settings)) return;
+		if (this.permissions === UNKNOWN_PERMISSIONS) {
+			await this.refreshPermissions();
+		}
 		await this.bindOpenEditors();
+		this.emitPermissions();
+	}
+
+	/**
+	 * Re-applies permissions to every editor that is currently bound - an editor whose note just
+	 * became read-only (or readable again) is rebound, so the change is visible immediately
+	 * instead of after the next file switch.
+	 */
+	async applyPermissionChange(): Promise<void> {
+		await this.refreshPermissions();
+		for (const path of [...this.boundViews.keys()]) {
+			this.unbind(path);
+		}
+        await this.bindOpenEditors();
 	}
 
 	/** Editors of all currently open Markdown leaves, one entry per distinct file. */
@@ -153,6 +212,11 @@ export class SyncManager {
 
 		for (const { file, cm } of open) {
 			if (this.boundViews.get(file.path) === cm) continue; // already bound to this very editor
+			if (!canRead(this.permissions, file.path)) {
+				// Not ours to see: no session, no socket, no cursor - the note simply is not
+				// synchronized for this user (the server would refuse anyway).
+				continue;
+			}
 			try {
 				await this.bindEditor(file, cm);
 			} catch (error) {
@@ -164,7 +228,8 @@ export class SyncManager {
 	}
 
 	private async bindEditor(file: TFile, cm: EditorView): Promise<void> {
-		const session = await this.getOrCreateSession(file);
+		const writable = canWrite(this.permissions, file.path);
+		const session = await this.getOrCreateSession(file, writable);
 		const localContent = await this.app.vault.read(file);
 
 		// Connect and let the server replay this document's history BEFORE deciding whether the
@@ -180,13 +245,16 @@ export class SyncManager {
 		if (!this.editorStillShows(file, cm)) return;
 
 		const reconciliation = decideReconciliation(session.ytext.toString(), cm.state.doc.toString());
-		if (reconciliation.action === "seed") {
+		if (reconciliation.action === "seed" && !writable) {
+			// Nothing to seed from a reader: their local copy is not authoritative, and pushing it
+			// would be a write they are not allowed to make.
+		} else if (reconciliation.action === "seed") {
 			session.seedIfEmpty(reconciliation.content || localContent);
 		} else if (reconciliation.action === "replaceEditor") {
 			cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: reconciliation.content } });
 		}
 
-		cm.dispatch({ effects: syncCompartment.reconfigure(buildCollabExtension(session)) });
+		cm.dispatch({ effects: syncCompartment.reconfigure(buildCollabExtension(session, !writable)) });
 		this.boundViews.set(file.path, cm);
 	}
 
@@ -252,7 +320,7 @@ export class SyncManager {
 		this.presenceListener?.([]);
 	}
 
-	private async getOrCreateSession(file: TFile): Promise<DocumentSession> {
+	private async getOrCreateSession(file: TFile, writable = true): Promise<DocumentSession> {
 		const existing = this.sessions.get(file.path);
 		if (existing) return existing;
 
@@ -265,6 +333,7 @@ export class SyncManager {
 			apiKey: settings.apiKey,
 			userName: this.userName,
 			userColor: this.userColor,
+			readOnly: !writable,
 			onError: (error) => console.error("[StoneSync]", error),
 			onStatusChange: (status) => {
 				if (status === "unauthorized" && !this.shownUnauthorizedNotice) {

@@ -36,7 +36,9 @@ export class VaultEventsManager {
 		private readonly app: App,
 		private readonly getSettings: () => StoneSyncSettings,
 		private readonly userName: string,
-		private readonly userColor: string
+		private readonly userColor: string,
+		/** Re-reads permissions and rebinds open editors after the server reports a change. */
+		private readonly onAccessChanged: () => Promise<void> = async () => {}
 	) {}
 
 	start(): void {
@@ -154,6 +156,18 @@ export class VaultEventsManager {
 			// own concurrent action is recoverable from Obsidian's own trash, not just gone.
 			await this.app.vault.trash(file, true);
 			new Notice(`StoneSync: "${event.path}" was deleted by a collaborator.`);
+		} else if (event.type === "access_revoked") {
+			// Revoking access has to actually take the content off this device - otherwise the
+			// copy that is already here stays readable forever and only stops receiving updates.
+			// Editors are rebound first, so an open note becomes read-only/unsynced immediately.
+			await this.onAccessChanged();
+
+			const file = this.app.vault.getAbstractFileByPath(event.path);
+			if (!file) return;
+			await this.app.vault.trash(file, true);
+			new Notice(
+				`StoneSync: You no longer have access to "${event.path}" - the local copy was moved to Obsidian's trash.`
+			);
 		}
 	}
 }

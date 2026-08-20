@@ -17,7 +17,20 @@ export interface VaultEventDeleted {
 	originSessionId: string | null;
 }
 
-export type VaultEvent = VaultEventCreated | VaultEventDeleted;
+/**
+ * A note this user could read a moment ago is no longer theirs to see - their role changed or a
+ * path rule now excludes them. Sent only to the affected user (see `VaultEventsHandler`), so the
+ * local copy can be removed instead of quietly lingering on the device after access was revoked.
+ */
+export interface VaultEventAccessRevoked {
+	type: "access_revoked";
+	documentId: string | null;
+	path: string;
+	/** Always null here - a revocation is never something this client caused itself. */
+	originSessionId: string | null;
+}
+
+export type VaultEvent = VaultEventCreated | VaultEventDeleted | VaultEventAccessRevoked;
 
 export interface VaultEventsSocketOptions {
 	/** e.g. "wss://stonesync.example.com" (no trailing slash). */

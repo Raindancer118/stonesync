@@ -9,6 +9,11 @@ import { VaultUploadService } from "./sync/VaultUploadService";
 import { VaultEventsManager } from "./sync/VaultEventsManager";
 import { createSyncExtension } from "./editor/syncExtension";
 import { parseConnectParams } from "./onboarding/DeepLinkHandler";
+import { PermissionsClient } from "./access/PermissionsClient";
+import { canManage, type AccessLevel, type VaultPermissions } from "./access/permissions";
+import { MembersModal } from "./ui/MembersModal";
+import { HistoryModal } from "./ui/HistoryModal";
+import { DocumentIdResolver } from "./sync/DocumentIdResolver";
 import { exchangeCode } from "./onboarding/ApiKeyExchangeClient";
 
 const CURSOR_COLORS = [
@@ -63,6 +68,8 @@ export default class StoneSyncPlugin extends Plugin {
 	private statusBarItemEl: HTMLElement | null = null;
 	private lastStatus: ConnectionStatus | null = null;
 	private lastPeers: Peer[] = [];
+	private lastLevel: AccessLevel | null = null;
+	private lastPermissions: VaultPermissions | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -73,7 +80,8 @@ export default class StoneSyncPlugin extends Plugin {
 
 		const userName = this.settings.displayName;
 		this.syncManager = new SyncManager(this.app, () => this.settings, userName, pickUserColor(userName));
-		this.vaultEventsManager = new VaultEventsManager(this.app, () => this.settings, userName, pickUserColor(userName));
+		this.vaultEventsManager = new VaultEventsManager(this.app, () => this.settings, userName, pickUserColor(userName),
+			() => this.syncManager?.applyPermissionChange() ?? Promise.resolve());
 		this.vaultEventsManager.start();
 
 		this.registerEditorExtension(createSyncExtension());
@@ -94,6 +102,7 @@ export default class StoneSyncPlugin extends Plugin {
 		this.statusBarItemEl.onClickEvent((evt) => this.showActionsMenu(evt));
 		this.syncManager.setStatusListener((status) => this.updateStatusBar(status));
 		this.syncManager.setPresenceListener((peers) => this.updatePresence(peers));
+		this.syncManager.setPermissionsListener((permissions, level) => this.updatePermissions(permissions, level));
 
 		this.addRibbonIcon("refresh-cw", "StoneSync actions", (evt) => this.showActionsMenu(evt));
 
@@ -111,6 +120,18 @@ export default class StoneSyncPlugin extends Plugin {
 			callback: () => {
 				void this.syncManager?.syncNow();
 			},
+		});
+
+		this.addCommand({
+			id: "stonesync-manage-collaborators",
+			name: "Manage collaborators and folder rules",
+			callback: () => this.openMembersModal(),
+		});
+
+		this.addCommand({
+			id: "stonesync-note-history",
+			name: "Show who changed this note",
+			callback: () => void this.openHistoryModal(),
 		});
 
 		this.addCommand({
@@ -160,7 +181,7 @@ export default class StoneSyncPlugin extends Plugin {
 
 		// initial binding, in case a Markdown file is already open when the plugin loads
 		this.app.workspace.onLayoutReady(() => {
-			void this.syncManager?.onActiveLeafChange();
+			void this.syncManager?.refreshPermissions().then(() => this.syncManager?.onActiveLeafChange());
 		});
 	}
 
@@ -175,6 +196,14 @@ export default class StoneSyncPlugin extends Plugin {
 		this.lastStatus = status;
 		if (status === null) this.lastPeers = [];
 		const { label, cssClass } = describeStatus(status);
+		this.renderStatusBar(label, cssClass);
+	}
+
+	/** The caller's own role, so "why can't I type here" is answerable at a glance. */
+	private updatePermissions(permissions: VaultPermissions, level: AccessLevel | null): void {
+		this.lastPermissions = permissions;
+		this.lastLevel = level;
+		const { label, cssClass } = describeStatus(this.lastStatus);
 		this.renderStatusBar(label, cssClass);
 	}
 
@@ -195,6 +224,13 @@ export default class StoneSyncPlugin extends Plugin {
 		this.statusBarItemEl.empty();
 		this.statusBarItemEl.createSpan({ cls: `stonesync-status-dot stonesync-status-dot--${cssClass}` });
 		this.statusBarItemEl.createSpan({ text: `StoneSync: ${label}`, cls: "stonesync-status-text" });
+
+		if (this.lastLevel && this.lastLevel !== "EDITOR" && this.lastLevel !== "OWNER") {
+			this.statusBarItemEl.createSpan({
+				text: this.lastLevel === "NONE" ? "· no access" : "· read-only",
+				cls: "stonesync-status-role",
+			});
+		}
 
 		if (this.lastPeers.length === 0) {
 			this.statusBarItemEl.setAttr("aria-label", "StoneSync - nobody else is in this note");
@@ -236,6 +272,21 @@ export default class StoneSyncPlugin extends Plugin {
 		menu.addSeparator();
 		menu.addItem((item) =>
 			item
+				.setTitle("Show who changed this note")
+				.setIcon("history")
+				.onClick(() => void this.openHistoryModal())
+		);
+		if (!this.lastPermissions || canManage(this.lastPermissions)) {
+			menu.addItem((item) =>
+				item
+					.setTitle("Manage collaborators and folder rules")
+					.setIcon("users")
+					.onClick(() => this.openMembersModal())
+			);
+		}
+		menu.addSeparator();
+		menu.addItem((item) =>
+			item
 				.setTitle("Open StoneSync settings")
 				.setIcon("settings")
 				.onClick(() => {
@@ -247,6 +298,40 @@ export default class StoneSyncPlugin extends Plugin {
 		menu.showAtMouseEvent(evt);
 	}
 
+	private permissionsClient(): PermissionsClient | null {
+		if (!this.settings.serverUrl || !this.settings.apiKey || !this.settings.vaultId) {
+			new Notice("StoneSync: Please set server URL, API key and vault ID in settings first.");
+			return null;
+		}
+		return new PermissionsClient(this.settings.serverUrl, this.settings.apiKey, this.settings.vaultId);
+	}
+
+	private openMembersModal(): void {
+		const client = this.permissionsClient();
+		if (client) new MembersModal(this.app, client).open();
+	}
+
+	/**
+	 * Resolves the active note's server-side id first: history is keyed by document, and the
+	 * plugin only ever knows the path until it asks.
+	 */
+	private async openHistoryModal(): Promise<void> {
+		const client = this.permissionsClient();
+		const file = this.app.workspace.getActiveFile();
+		if (!client || !file) {
+			if (client) new Notice("StoneSync: Open a note first.");
+			return;
+		}
+		try {
+			const resolver = new DocumentIdResolver(this.settings.serverUrl, this.settings.apiKey, this.settings.vaultId);
+			const documentId = await resolver.resolve(file.path);
+			new HistoryModal(this.app, client, documentId, file.path).open();
+		} catch (error) {
+			console.error("[StoneSync] Failed to resolve document for history", error);
+			new Notice("StoneSync: Could not load this note's history.");
+		}
+	}
+
 	async loadSettings(): Promise<void> {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 	}
@@ -254,6 +339,7 @@ export default class StoneSyncPlugin extends Plugin {
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 		this.syncManager?.reconfigure();
+		void this.syncManager?.refreshPermissions();
 		this.vaultEventsManager?.start();
 	}
 

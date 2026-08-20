@@ -22,6 +22,12 @@ export interface DocumentSessionOptions {
 	onRestoreContent?: () => void;
 	/** See `StoneSyncSocketOptions.onDeleteNotice`. */
 	onDeleteNotice?: () => void;
+	/**
+	 * When true, this session never pushes content to the git side-channel. The server refuses
+	 * such writes anyway (see `MaterializeService`), so sending them would only produce a stream
+	 * of 403s and audit noise for someone who is simply reading.
+	 */
+	readOnly?: boolean;
 }
 
 /**
@@ -88,6 +94,7 @@ export class DocumentSession {
 	}
 
 	private scheduleMaterialize(): void {
+		if (this.options.readOnly) return;
 		if (this.materializeTimer) {
 			clearTimeout(this.materializeTimer);
 		}
@@ -190,6 +197,14 @@ export class DocumentSession {
 	 * separate git side-channel would otherwise lag behind by up to 3s forever).
 	 */
 	destroy(): void {
+		if (this.options.readOnly) {
+			this.awareness.setLocalState(null);
+			this.socket.destroy();
+			this.awareness.destroy();
+			this.doc.destroy();
+			this.connected = false;
+			return;
+		}
 		if (this.materializeTimer) {
 			clearTimeout(this.materializeTimer);
 			this.materializeTimer = null;
