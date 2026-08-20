@@ -1,0 +1,12 @@
+#!/bin/sh
+# Removes a path rule (ids come from ss-access).
+set -eu
+. /usr/local/bin/api-env.sh
+
+if [ "${2:-}" = "" ]; then
+	echo "Usage: ss-rule-rm <vaultId> <ruleId>" >&2
+	exit 1
+fi
+
+curl -sf -X DELETE "$API_BASE/vaults/$1/rules/$2" -H "$API_AUTH"
+echo "removed."

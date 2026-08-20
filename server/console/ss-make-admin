@@ -1,0 +1,14 @@
+#!/bin/sh
+# Promotes/demotes an account-wide administrator (reaches every vault).
+set -eu
+. /usr/local/bin/admin-env.sh
+
+if [ "${1:-}" = "" ]; then
+	echo "Usage: ss-make-admin <userId> [USER|ADMIN]   (default: ADMIN)" >&2
+	exit 1
+fi
+
+curl -sf -X PUT "$ADMIN_BASE/users/$1/system-role" \
+	-H "$ADMIN_AUTH" -H "Content-Type: application/json" \
+	-d "{\"role\":\"${2:-ADMIN}\"}"
+echo "system role set to ${2:-ADMIN}."

@@ -1,0 +1,16 @@
+#!/bin/sh
+# Shows who may do what in a vault: members with their roles, plus every path rule.
+set -eu
+. /usr/local/bin/api-env.sh
+
+if [ "${1:-}" = "" ]; then
+	echo "Usage: ss-access <vaultId>" >&2
+	exit 1
+fi
+
+echo "Members:"
+curl -sf "$API_BASE/vaults/$1/members" -H "$API_AUTH" | jq -r '.[] | "  \(.role)\t\(.email)\t\(.userId)"'
+echo
+echo "Path rules (override the vault role for a subtree):"
+curl -sf "$API_BASE/vaults/$1/rules" -H "$API_AUTH" \
+	| jq -r '.[] | "  \(.level)\ton \(if .pathPrefix == "" then "<whole vault>" else .pathPrefix end)\tfor \(.email // "everyone")\t(\(.id))"'

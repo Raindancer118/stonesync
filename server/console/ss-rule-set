@@ -1,0 +1,23 @@
+#!/bin/sh
+# Creates or updates a path rule. Level NONE hides the subtree entirely - the notes are then
+# neither listed nor downloadable nor openable for the affected user(s).
+set -eu
+. /usr/local/bin/api-env.sh
+
+if [ "${4:-}" = "" ]; then
+	echo "Usage: ss-rule-set <vaultId> <pathPrefix|/> <userId|everyone> <NONE|VIEWER|EDITOR|OWNER>" >&2
+	echo "Example: ss-rule-set \$VAULT Privat everyone NONE" >&2
+	exit 1
+fi
+
+PREFIX="$2"
+[ "$PREFIX" = "/" ] && PREFIX=""
+if [ "$3" = "everyone" ]; then
+	USER_JSON=null
+else
+	USER_JSON="\"$3\""
+fi
+
+curl -sf -X PUT "$API_BASE/vaults/$1/rules" \
+	-H "$API_AUTH" -H "Content-Type: application/json" \
+	-d "{\"pathPrefix\":\"$PREFIX\",\"userId\":$USER_JSON,\"level\":\"$4\"}" | jq .

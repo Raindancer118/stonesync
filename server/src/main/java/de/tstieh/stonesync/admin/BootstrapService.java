@@ -44,6 +44,10 @@ public class BootstrapService {
 
         AppLog.info("Running first-time bootstrap for admin email '{}'", properties.adminEmail());
         UserEntity user = adminService.createUser(properties.adminEmail(), randomPasswordHash());
+        // The very first account is the server administrator: an account-wide ADMIN reaches every
+        // vault, which is what makes the console commands (and later operators) work without
+        // anyone having to hand out the bootstrap key itself.
+        adminService.changeSystemRole(user.getId(), SystemRole.ADMIN, null);
         VaultEntity vault = adminService.createVault(properties.vaultName(), user.getId());
         adminService.grantAccess(user.getId(), vault.getId(), VaultRole.OWNER);
         String rawApiKey = adminService.createApiKey(user.getId(), properties.deviceName());

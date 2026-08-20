@@ -1,0 +1,17 @@
+#!/bin/sh
+# Who changed one note, when - and with -d, what exactly (unified diff of one change).
+set -eu
+. /usr/local/bin/api-env.sh
+
+if [ "${1:-}" = "" ]; then
+	echo "Usage: ss-file-history <documentId> [commitId]" >&2
+	echo "  without a commitId: the change log; with one: that change's diff" >&2
+	exit 1
+fi
+
+if [ "${2:-}" = "" ]; then
+	curl -sf "$API_BASE/documents/$1/history" -H "$API_AUTH" \
+		| jq -r '.[] | "\(.changedAt)  \(.authorEmail)\t\(.commitId[0:10])"'
+else
+	curl -sf "$API_BASE/documents/$1/history/$2/diff" -H "$API_AUTH"
+fi

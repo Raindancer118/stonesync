@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -46,6 +47,12 @@ public class AdminController {
         return adminService.listVaults().stream()
                 .map(v -> new VaultResponse(v.getId(), v.getName(), v.getOwnerId()))
                 .toList();
+    }
+
+    /** Promotes/demotes an account-wide admin (see {@link SystemRole}). */
+    @PutMapping("/users/{userId}/system-role")
+    public void changeSystemRole(@PathVariable UUID userId, @RequestBody ChangeSystemRoleRequest request) {
+        adminService.changeSystemRole(userId, request.role(), null);
     }
 
     @PostMapping("/vaults/{vaultId}/access")
@@ -100,6 +107,9 @@ public class AdminController {
     }
 
     public record VaultResponse(UUID id, String name, UUID ownerId) {
+    }
+
+    public record ChangeSystemRoleRequest(SystemRole role) {
     }
 
     public record GrantAccessRequest(UUID userId, VaultRole role) {

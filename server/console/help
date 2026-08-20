@@ -29,10 +29,21 @@ Write (via the Admin REST API, needs CONSOLE_API_KEY set on the container):
                                     create a single-use, 7-day invite link for a vault, bound
                                     to one colleague's email (they log in via Authentik with
                                     exactly that email and get auto-provisioned)
+  ss-make-admin <user> [USER|ADMIN]  promote/demote an account-wide admin (reaches every vault)
   ss-vault-restore <vault> <commitIsh>
                                     restore a vault to a point-in-time git commit (see
                                     ss-git-log) - any document not present in that commit is
                                     tombstoned. No confirmation prompt; double-check the commit.
+
+Permissions & audit (needs CONSOLE_API_KEY, whose account must be an ADMIN):
+  ss-access <vault>                 members with their roles + all path rules
+  ss-rule-set <vault> <prefix|/> <user|everyone> <NONE|VIEWER|EDITOR|OWNER>
+                                    scope access to a folder/note: NONE hides it entirely
+                                    (not listed, not downloadable, no sync socket)
+  ss-rule-rm <vault> <ruleId>       remove a path rule (ids from ss-access)
+  ss-audit <vault> [type] [limit]   audit trail: permission changes, content changes, refusals
+  ss-file-history <document> [commit]
+                                    who changed a note and when; with a commit id, its diff
 
 Container logs are not duplicated here on purpose — use Portainer's own
 "Logs" tab for that (streams `docker logs` directly, no extra tooling

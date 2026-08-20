@@ -1,0 +1,18 @@
+#!/bin/sh
+# The vault's audit trail: permission changes, content changes and refused attempts.
+set -eu
+. /usr/local/bin/api-env.sh
+
+if [ "${1:-}" = "" ]; then
+	echo "Usage: ss-audit <vaultId> [type] [limit]" >&2
+	echo "  type: ACCESS_GRANTED | ACCESS_ROLE_CHANGED | ACCESS_REVOKED | PATH_RULE_SET |" >&2
+	echo "        PATH_RULE_REMOVED | DOCUMENT_CREATED | DOCUMENT_RENAMED | DOCUMENT_DELETED |" >&2
+	echo "        DOCUMENT_EDITED | ATTACHMENT_UPLOADED | ACCESS_DENIED | ..." >&2
+	exit 1
+fi
+
+QUERY="limit=${3:-100}"
+[ "${2:-}" = "" ] || QUERY="$QUERY&type=$2"
+
+curl -sf "$API_BASE/vaults/$1/audit?$QUERY" -H "$API_AUTH" \
+	| jq -r '.[] | "\(.occurredAt)  \(.type)\t\(.actor)\t\(.path // "-")\t\(.detail // "")"'
