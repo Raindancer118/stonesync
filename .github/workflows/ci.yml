@@ -28,9 +28,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Node 22, not 20: the editor tests run under jsdom, whose undici dependency needs a
+      # Node with `webidl.util.markAsUncloneable` (>= 20.18 / 22).
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: plugin/package-lock.json
       - name: Install
@@ -75,7 +77,7 @@ jobs:
           cache: maven
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: plugin/package-lock.json
       - name: Package server
