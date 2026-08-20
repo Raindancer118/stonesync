@@ -24,6 +24,9 @@ Write (via the Admin REST API, needs CONSOLE_API_KEY set on the container):
   ss-revoke-access <user> <vault>   remove a user's access to a vault
   ss-create-apikey <user> <device>  create a new API key for a user (shown once)
   ss-revoke-apikey <apiKeyId>       revoke an API key
+  ss-create-invite <vault> <OWNER|EDITOR|VIEWER>
+                                    create a single-use, 7-day invite link for a vault
+                                    (colleague logs in via Authentik, gets auto-provisioned)
 
 Container logs are not duplicated here on purpose — use Portainer's own
 "Logs" tab for that (streams `docker logs` directly, no extra tooling

@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/admin-env.sh
+
+if [ "${2:-}" = "" ]; then
+	echo "Usage: ss-create-invite <vaultId> <OWNER|EDITOR|VIEWER>" >&2
+	echo "(run ss-vaults first to find the vault id)" >&2
+	exit 1
+fi
+
+curl -sf -X POST "$ADMIN_BASE/vaults/$1/invites" \
+	-H "$ADMIN_AUTH" -H "Content-Type: application/json" \
+	-d "{\"role\":\"$2\"}" | jq .
