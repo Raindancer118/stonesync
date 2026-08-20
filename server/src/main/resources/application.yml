@@ -39,6 +39,12 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+  # Without this, Spring builds absolute URLs (like the OAuth2 "{baseUrl}" redirect-uri
+  # below) from the raw http:// connection Tomcat sees, ignoring the X-Forwarded-Proto
+  # header the reverse proxy sets - which sends Authentik an http:// redirect_uri and
+  # gets the whole login flow rejected with 400 (found via a real invite-link test
+  # against the live server after Phase 3 deploy).
+  forward-headers-strategy: framework
 
 stonesync:
   ticket:
