@@ -55,14 +55,21 @@ public final class PathRules {
      * @param userId the user the decision is for; rules addressed at other users are ignored
      */
     public static AccessLevel resolve(Collection<PathRule> rules, UUID userId, String path, AccessLevel fallback) {
+        return decidingRule(rules, userId, path).map(PathRule::level).orElse(fallback);
+    }
+
+    /**
+     * The rule that actually decides {@code path} for this user, if any. Exposed separately so a
+     * UI can explain *why* someone has the access they have ("inherited from the rule on Team/")
+     * instead of only showing the outcome.
+     */
+    public static java.util.Optional<PathRule> decidingRule(Collection<PathRule> rules, UUID userId, String path) {
         return rules.stream()
                 .filter(rule -> rule.appliesTo(userId))
                 .filter(rule -> matches(rule.pathPrefix(), path))
                 .max(Comparator
                         .comparingInt((PathRule rule) -> normalize(rule.pathPrefix()).length())
-                        .thenComparingInt(rule -> rule.userId() != null ? 1 : 0))
-                .map(PathRule::level)
-                .orElse(fallback);
+                        .thenComparingInt(rule -> rule.userId() != null ? 1 : 0));
     }
 
     /** One rule, decoupled from its JPA entity. A {@code null} userId means "everyone". */

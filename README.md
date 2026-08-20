@@ -134,8 +134,10 @@ Everything is auditable - permission changes, content changes and refused attemp
 `ss-audit`, and per note "who changed this, when, and what exactly" via the note history (backed
 by the vault's git history, with the real author on each commit).
 
-Owners manage all of this from inside Obsidian (*Manage collaborators and folder rules*) or from
-the server console (`ss-access`, `ss-rule-set`, `ss-audit`, `ss-file-history`).
+Owners manage all of this from inside Obsidian - right-click any note or folder →
+*StoneSync: Manage access* for that exact path (each row says whether its level is set here,
+inherited from a parent folder, or comes from the person's vault role), or *Manage collaborators
+and folder rules* for the whole vault - as well as from the server console (`ss-access`, `ss-rule-set`, `ss-audit`, `ss-file-history`).
 
 ## Linking across vaults
 

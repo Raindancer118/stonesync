@@ -146,6 +146,56 @@ public class VaultAccessAdminService {
     }
 
     /**
+     * Who may do what with one specific note or folder, and why - the data behind the per-file
+     * access dialog. Resolution happens here rather than in the client so there is exactly one
+     * implementation of the precedence rules.
+     */
+    public PathAccess accessFor(UUID actorId, UUID vaultId, String path) {
+        vaultAccessService.requireVaultPermission(actorId, vaultId, Permission.MANAGE_MEMBERS);
+        String normalized = PathRules.normalize(path);
+        List<VaultPathRuleEntity> allRules = pathRuleRepository.findByVaultId(vaultId);
+
+        List<PathAccessEntry> entries = new ArrayList<>();
+        entries.add(entryFor(vaultId, normalized, allRules, null, "everyone", null));
+        for (UserVaultAccessEntity membership : accessRepository.findByVaultId(vaultId)) {
+            entries.add(entryFor(vaultId, normalized, allRules, membership.getUserId(),
+                    emailOf(membership.getUserId()), membership.getRole()));
+        }
+        entries.sort((a, b) -> a.userId() == null ? -1 : b.userId() == null ? 1 : a.email().compareToIgnoreCase(b.email()));
+        return new PathAccess(normalized, entries);
+    }
+
+    private PathAccessEntry entryFor(UUID vaultId, String path, List<VaultPathRuleEntity> allRules, UUID userId,
+                                      String label, VaultRole vaultRole) {
+        List<PathRules.PathRule> applicable = allRules.stream()
+                .filter(rule -> userId == null ? rule.getUserId() == null : rule.getUserId() == null || rule.getUserId().equals(userId))
+                .map(VaultPathRuleEntity::toRule)
+                .toList();
+        AccessLevel base = userId == null || vaultRole == null ? AccessLevel.NONE : AccessLevel.of(vaultRole);
+        // An owner is never restricted by a blanket rule - mirror that here, or the dialog would
+        // claim an owner has less access than they really do.
+        List<PathRules.PathRule> effective = base == AccessLevel.OWNER
+                ? applicable.stream().filter(rule -> rule.userId() != null).toList()
+                : applicable;
+        Optional<PathRules.PathRule> deciding = PathRules.decidingRule(effective, userId, path);
+
+        UUID exactRuleId = allRules.stream()
+                .filter(rule -> PathRules.normalize(rule.getPathPrefix()).equals(path))
+                .filter(rule -> java.util.Objects.equals(rule.getUserId(), userId))
+                .map(VaultPathRuleEntity::getId)
+                .findFirst()
+                .orElse(null);
+
+        return new PathAccessEntry(
+                userId,
+                label,
+                vaultRole,
+                deciding.map(PathRules.PathRule::level).orElse(base),
+                deciding.map(rule -> PathRules.normalize(rule.pathPrefix())).orElse(null),
+                exactRuleId);
+    }
+
+    /**
      * Sets the vault's link namespace ({@code [[slug:Note]]}). Lowercase letters, digits and
      * dashes only, so a namespace can never be confused with a path or an Obsidian heading link.
      */
@@ -222,6 +272,22 @@ public class VaultAccessAdminService {
     }
 
     public record Member(UUID userId, String email, VaultRole role) {
+    }
+
+    /**
+     * @param userId       null for the "everyone" row
+     * @param vaultRole    the member's role on the whole vault (null for "everyone")
+     * @param level        what actually applies to this path
+     * @param inheritedFrom the path prefix of the rule that decided it, or null when the vault
+     *                      role decided - this is what lets the dialog say "inherited from Team/"
+     * @param exactRuleId  the rule sitting on exactly this path for exactly this user, if any -
+     *                     only that one can be removed to fall back to inheritance
+     */
+    public record PathAccessEntry(UUID userId, String email, VaultRole vaultRole, AccessLevel level,
+                                   String inheritedFrom, UUID exactRuleId) {
+    }
+
+    public record PathAccess(String path, List<PathAccessEntry> entries) {
     }
 
     public record Rule(UUID id, String pathPrefix, UUID userId, String email, AccessLevel level) {

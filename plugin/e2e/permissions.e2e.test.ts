@@ -158,4 +158,37 @@ describe.skipIf(!configured)("permissions against a real server", () => {
 		const diff = await client.diff(documentId, history[0].commitId);
 		expect(diff).toContain("second line");
 	});
+	it("explains per note who has access and where it comes from", async () => {
+		const folder = `e2e-access-${Date.now()}`;
+		const notePath = `${folder}/Payroll.md`;
+		await new DocumentIdResolver(serverUrl, apiKey, vaultId).resolve(notePath);
+
+		const owner = new PermissionsClient(serverUrl, apiKey, vaultId);
+		const viewerId = (await new PermissionsClient(serverUrl, viewerKey, vaultId).me()).userId;
+		const rule = await owner.setRule(folder, viewerId, "NONE");
+		try {
+			const access = await owner.accessFor(notePath);
+			const viewerEntry = access.entries.find((entry) => entry.userId === viewerId);
+
+			expect(viewerEntry?.level).toBe("NONE");
+			// The rule sits on the folder, not on the note - so the dialog says "inherited" and
+			// offers nothing to remove here.
+			expect(viewerEntry?.inheritedFrom).toBe(folder);
+			expect(viewerEntry?.exactRuleId).toBeNull();
+			expect(access.entries.some((entry) => entry.userId === null)).toBe(true);
+
+			// Setting it on the note itself gives that row a rule of its own.
+			await owner.setRule(notePath, viewerId, "VIEWER");
+			const afterOverride = await owner.accessFor(notePath);
+			const overridden = afterOverride.entries.find((entry) => entry.userId === viewerId);
+			expect(overridden?.level).toBe("VIEWER");
+			expect(overridden?.exactRuleId).not.toBeNull();
+
+			await owner.removeRule(overridden!.exactRuleId!);
+			const afterRemoval = await owner.accessFor(notePath);
+			expect(afterRemoval.entries.find((entry) => entry.userId === viewerId)?.level).toBe("NONE");
+		} finally {
+			await owner.removeRule(rule.id);
+		}
+	});
 });

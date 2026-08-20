@@ -78,6 +78,13 @@ public class VaultAccessController {
         return new SlugResponse(accessAdminService.setSlug(userId(authentication), vaultId, request.slug()));
     }
 
+    /** Who may do what with one specific note or folder - drives the per-file access dialog. */
+    @GetMapping("/access")
+    public VaultAccessAdminService.PathAccess accessForPath(@PathVariable UUID vaultId, @RequestParam String path,
+                                                             Authentication authentication) {
+        return accessAdminService.accessFor(userId(authentication), vaultId, path);
+    }
+
     @GetMapping("/members")
     public List<VaultAccessAdminService.Member> members(@PathVariable UUID vaultId, Authentication authentication) {
         return accessAdminService.listMembers(userId(authentication), vaultId);

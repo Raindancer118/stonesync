@@ -1,4 +1,4 @@
-import { Menu, Notice, Plugin, TFile, type TAbstractFile } from "obsidian";
+import { Menu, Notice, Plugin, TFile, TFolder, type TAbstractFile } from "obsidian";
 import { DEFAULT_SETTINGS, type StoneSyncSettings } from "./settings/StoneSyncSettings";
 import { StoneSyncSettingTab } from "./settings/StoneSyncSettingTab";
 import { SyncManager, type Peer } from "./sync/SyncManager";
@@ -13,6 +13,7 @@ import { PermissionsClient } from "./access/PermissionsClient";
 import { canManage, type AccessLevel, type VaultPermissions } from "./access/permissions";
 import { MembersModal } from "./ui/MembersModal";
 import { HistoryModal } from "./ui/HistoryModal";
+import { PathAccessModal } from "./ui/PathAccessModal";
 import { DocumentIdResolver } from "./sync/DocumentIdResolver";
 import { MirrorRegistry } from "./links/MirrorRegistry";
 import { CrossVaultLinkOpener } from "./links/CrossVaultLinkOpener";
@@ -191,6 +192,17 @@ export default class StoneSyncPlugin extends Plugin {
 			},
 		});
 
+		// Right-click on a note or folder (file explorer, tab header, search results): manage who
+		// may see and change exactly that path, plus its history.
+		this.registerEvent(
+			this.app.workspace.on("file-menu", (menu, file) => this.addAccessMenuItems(menu, file))
+		);
+		this.registerEvent(
+			this.app.workspace.on("editor-menu", (menu, _editor, view) => {
+				if (view.file) this.addAccessMenuItems(menu, view.file);
+			})
+		);
+
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", () => {
 				void this.syncManager?.onActiveLeafChange();
@@ -364,6 +376,42 @@ export default class StoneSyncPlugin extends Plugin {
 		menu.showAtMouseEvent(evt);
 	}
 
+	/**
+	 * Menu entries for one specific note or folder. Managing access is only offered to someone who
+	 * may actually do it - the server enforces it regardless, but offering a dialog that can only
+	 * fail is worse than not offering it.
+	 */
+	private addAccessMenuItems(menu: Menu, file: TAbstractFile): void {
+		const isFolder = file instanceof TFolder;
+		if (!isFolder && !(file instanceof TFile)) return;
+		if (this.mirrors?.isInMirrorFolder(file.path)) return; // belongs to another vault
+
+		if (!this.lastPermissions || canManage(this.lastPermissions)) {
+			menu.addItem((item) =>
+				item
+					.setTitle("StoneSync: Manage access")
+					.setIcon("lock")
+					.onClick(() => {
+						const client = this.permissionsClientOrNull();
+						if (!client) {
+							new Notice("StoneSync: Please set server URL, API key and vault ID in settings first.");
+							return;
+						}
+						new PathAccessModal(this.app, client, file.path, isFolder).open();
+					})
+			);
+		}
+
+		if (file instanceof TFile && file.extension === "md") {
+			menu.addItem((item) =>
+				item
+					.setTitle("StoneSync: Show who changed this note")
+					.setIcon("history")
+					.onClick(() => void this.openHistoryModal(file))
+			);
+		}
+	}
+
 	/** Same as `permissionsClient()`, but quiet - for background/UI lookups that may simply skip. */
 	permissionsClientOrNull(): PermissionsClient | null {
 		if (!this.settings.serverUrl || !this.settings.apiKey || !this.settings.vaultId) return null;
@@ -387,16 +435,19 @@ export default class StoneSyncPlugin extends Plugin {
 	 * Resolves the active note's server-side id first: history is keyed by document, and the
 	 * plugin only ever knows the path until it asks.
 	 */
-	private async openHistoryModal(): Promise<void> {
+	private async openHistoryModal(target?: TFile): Promise<void> {
 		const client = this.permissionsClient();
-		const file = this.app.workspace.getActiveFile();
+		const file = target ?? this.app.workspace.getActiveFile();
 		if (!client || !file) {
 			if (client) new Notice("StoneSync: Open a note first.");
 			return;
 		}
 		try {
+			// A mirrored foreign note has its own document elsewhere - resolving by path would
+			// look it up in the wrong vault.
+			const mirror = this.mirrors?.get(file.path);
 			const resolver = new DocumentIdResolver(this.settings.serverUrl, this.settings.apiKey, this.settings.vaultId);
-			const documentId = await resolver.resolve(file.path);
+			const documentId = mirror ? mirror.documentId : await resolver.resolve(file.path);
 			new HistoryModal(this.app, client, documentId, file.path).open();
 		} catch (error) {
 			console.error("[StoneSync] Failed to resolve document for history", error);

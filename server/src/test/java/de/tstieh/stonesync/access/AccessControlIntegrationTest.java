@@ -266,4 +266,39 @@ class AccessControlIntegrationTest {
                         .header("Authorization", "Bearer " + member.key()))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    @DisplayName("the per-path access view says who may do what with one note, and where it comes from")
+    void perPathAccessExplainsItself() throws Exception {
+        VaultEntity vault = vaultOwnedByNewUser("per-path-vault");
+        Person owner = person("owner5-" + UUID.randomUUID() + "@example.com", vault.getId(), VaultRole.OWNER);
+        Person member = person("member4-" + UUID.randomUUID() + "@example.com", vault.getId(), VaultRole.EDITOR);
+        document(vault.getId(), "Team/Payroll/2026.md");
+
+        // A rule one folder up - the note itself has no rule of its own.
+        mockMvc.perform(put("/api/vaults/{vaultId}/rules", vault.getId())
+                        .header("Authorization", "Bearer " + owner.key())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"pathPrefix\":\"Team/Payroll\",\"userId\":\"" + member.id() + "\",\"level\":\"NONE\"}"))
+                .andExpect(status().isOk());
+
+        String access = mockMvc.perform(get("/api/vaults/{vaultId}/access", vault.getId())
+                        .param("path", "Team/Payroll/2026.md")
+                        .header("Authorization", "Bearer " + owner.key()))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // The member is excluded here, and the dialog can say which rule did it.
+        assertThat(access).contains("\"level\":\"NONE\"", "\"inheritedFrom\":\"Team/Payroll\"");
+        // No rule sits on this exact path, so there is nothing to remove for falling back.
+        assertThat(access).contains("\"exactRuleId\":null");
+        // The owner is still OWNER on it.
+        assertThat(access).contains("\"level\":\"OWNER\"");
+
+        // An editor may not look at who has access.
+        mockMvc.perform(get("/api/vaults/{vaultId}/access", vault.getId())
+                        .param("path", "Team/Payroll/2026.md")
+                        .header("Authorization", "Bearer " + member.key()))
+                .andExpect(status().isForbidden());
+    }
 }

@@ -23,6 +23,23 @@ export interface Rule {
 	level: "NONE" | "VIEWER" | "EDITOR" | "OWNER";
 }
 
+/** One row of the per-file access dialog. `userId: null` is the "everyone" row. */
+export interface PathAccessEntry {
+	userId: string | null;
+	email: string;
+	vaultRole: "OWNER" | "EDITOR" | "VIEWER" | null;
+	level: "NONE" | "VIEWER" | "EDITOR" | "OWNER";
+	/** Prefix of the rule that decided this, or null when the vault role did. */
+	inheritedFrom: string | null;
+	/** A rule on exactly this path for exactly this person - only that one can be removed. */
+	exactRuleId: string | null;
+}
+
+export interface PathAccess {
+	path: string;
+	entries: PathAccessEntry[];
+}
+
 export interface AuditEntry {
 	id: number;
 	occurredAt: string;
@@ -70,6 +87,12 @@ export class PermissionsClient {
 		return this.request<{ slug: string | null }>("PUT", `/api/vaults/${encodeURIComponent(this.vaultId)}/slug`, {
 			slug,
 		});
+	}
+
+	/** Who may do what with one specific note or folder, and where that comes from. */
+	accessFor(path: string): Promise<PathAccess> {
+		const query = `path=${encodeURIComponent(path)}`;
+		return this.request<PathAccess>("GET", `/api/vaults/${encodeURIComponent(this.vaultId)}/access?${query}`);
 	}
 
 	members(): Promise<Member[]> {
