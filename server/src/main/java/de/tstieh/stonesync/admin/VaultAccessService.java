@@ -60,7 +60,14 @@ public class VaultAccessService {
             // restricted by one - both short-circuit before any rule is even read.
             return base;
         }
-        return PathRules.resolve(rulesFor(vaultId), userId, path, base);
+        // A blanket "everyone" rule never applies to a vault owner: the owner is the one who
+        // creates such rules to keep a folder private *from others*, and locking the person
+        // responsible for the vault out of its content (including its history and restores)
+        // would be a trap rather than a feature. A rule aimed at that owner by name still counts.
+        List<PathRules.PathRule> rules = base == AccessLevel.OWNER
+                ? rulesFor(vaultId).stream().filter(rule -> rule.userId() != null).toList()
+                : rulesFor(vaultId);
+        return PathRules.resolve(rules, userId, path, base);
     }
 
     /** All rules of a vault that could apply to this user (their own plus the everyone-rules). */

@@ -14,4 +14,11 @@ public record VaultEventMessage(String type, String documentId, String path, Str
 
     public static final String TYPE_DOCUMENT_CREATED = "document_created";
     public static final String TYPE_DOCUMENT_DELETED = "document_deleted";
+    /**
+     * A note the recipient could read until a moment ago is no longer theirs to see (their role
+     * changed, or a path rule now excludes them). Sent only to the affected user's own sessions -
+     * the client removes its local copy, so revoking access actually takes the content off the
+     * device instead of just stopping future updates.
+     */
+    public static final String TYPE_ACCESS_REVOKED = "access_revoked";
 }

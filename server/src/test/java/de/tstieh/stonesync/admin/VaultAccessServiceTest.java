@@ -137,6 +137,25 @@ class VaultAccessServiceTest {
     }
 
     @Test
+    @DisplayName("an everyone-rule does not lock the vault owner out of their own notes")
+    void everyoneRuleDoesNotApplyToTheOwner() {
+        membership(VaultRole.OWNER);
+        rules(rule("Privat", null, AccessLevel.NONE));
+
+        assertThat(service.canRead(userId, vaultId, "Privat/diary.md")).isTrue();
+    }
+
+    @Test
+    @DisplayName("a rule naming the owner explicitly still applies to them")
+    void userSpecificRuleAppliesToTheOwnerToo() {
+        membership(VaultRole.OWNER);
+        rules(rule("Team", userId, AccessLevel.VIEWER));
+
+        assertThat(service.canWrite(userId, vaultId, "Team/plan.md")).isFalse();
+        assertThat(service.canRead(userId, vaultId, "Team/plan.md")).isTrue();
+    }
+
+    @Test
     @DisplayName("a system admin is owner everywhere, without any membership row")
     void systemAdminHasAccessEverywhere() {
         when(userRepository.findById(userId)).thenReturn(Optional.of(adminUser()));

@@ -26,4 +26,11 @@ public interface VaultEventBroadcaster {
                                 String originSessionId);
 
     void notifyDocumentDeleted(UUID vaultId, UUID documentId, String path, String originSessionId);
+
+    /**
+     * Tells one specific user that a note is no longer readable for them (see
+     * {@code VaultEventMessage.TYPE_ACCESS_REVOKED}). Unlike the other two, this is never a
+     * vault-wide broadcast: everyone else's access is unchanged and must not be disturbed.
+     */
+    void notifyAccessRevoked(UUID vaultId, UUID userId, UUID documentId, String path);
 }

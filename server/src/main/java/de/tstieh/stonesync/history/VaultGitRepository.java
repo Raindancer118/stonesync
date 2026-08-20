@@ -79,7 +79,11 @@ public class VaultGitRepository {
 
             git.commit()
                     .setMessage("Materialized " + relativePath + " by " + authorEmail + " at " + when)
-                    .setAuthor(SYNTHETIC_AUTHOR_NAME, SYNTHETIC_AUTHOR_EMAIL)
+                    // The real person as the *author*, the server as the committer: this is what
+                    // makes "who changed this note, and what exactly" answerable straight from
+                    // the history, rather than only from a log line.
+                    .setAuthor(authorEmail, authorEmail)
+                    .setCommitter(SYNTHETIC_AUTHOR_NAME, SYNTHETIC_AUTHOR_EMAIL)
                     .call();
             AppLog.info("Committed {} in vault {} (by {})", relativePath, vaultId, authorEmail);
             return true;
@@ -150,6 +154,69 @@ public class VaultGitRepository {
             AppLog.error("Failed to read git log for vault {}: {}", vaultId, e.getMessage());
             throw new VaultGitException("Failed to read git log for vault " + vaultId, e);
         }
+    }
+
+    /**
+     * History of one file, newest first: who touched it, when, and the commit to diff against.
+     * Follows the file across renames is deliberately NOT attempted - a StoneSync rename is a
+     * metadata operation that produces a delete + add here, and pretending otherwise would make
+     * the audit trail less literal than it should be.
+     */
+    public List<FileHistoryEntry> logForPath(UUID vaultId, String relativePath, int limit) {
+        try (Git git = openOrInit(vaultId)) {
+            List<FileHistoryEntry> entries = new java.util.ArrayList<>();
+            for (RevCommit commit : git.log().addPath(relativePath).setMaxCount(Math.clamp(limit, 1, 500)).call()) {
+                entries.add(new FileHistoryEntry(commit.getName(),
+                        commit.getAuthorIdent().getEmailAddress(),
+                        Instant.ofEpochSecond(commit.getCommitTime()),
+                        commit.getShortMessage()));
+            }
+            return entries;
+        } catch (org.eclipse.jgit.api.errors.NoHeadException e) {
+            return List.of();
+        } catch (GitAPIException e) {
+            AppLog.error("Failed to read file history of {} in vault {}: {}", relativePath, vaultId, e.getMessage());
+            throw new VaultGitException("Failed to read file history of " + relativePath, e);
+        }
+    }
+
+    /** The unified diff one commit made to one file - the "what exactly changed" half. */
+    public String diffForPath(UUID vaultId, String commitIsh, String relativePath) {
+        try (Git git = openOrInit(vaultId)) {
+            Repository repository = git.getRepository();
+            ObjectId commitId = repository.resolve(commitIsh);
+            if (commitId == null) {
+                throw new CommitNotFoundException(commitIsh);
+            }
+            try (RevWalk revWalk = new RevWalk(repository);
+                 java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                 org.eclipse.jgit.diff.DiffFormatter formatter = new org.eclipse.jgit.diff.DiffFormatter(out)) {
+                RevCommit commit = revWalk.parseCommit(commitId);
+                formatter.setRepository(repository);
+                formatter.setPathFilter(org.eclipse.jgit.treewalk.filter.PathFilter.create(relativePath));
+                RevTree parentTree = commit.getParentCount() > 0
+                        ? revWalk.parseCommit(commit.getParent(0).getId()).getTree()
+                        : null;
+                formatter.format(parentTree == null
+                                ? new org.eclipse.jgit.treewalk.EmptyTreeIterator()
+                                : treeIterator(repository, parentTree),
+                        treeIterator(repository, commit.getTree()));
+                formatter.flush();
+                return out.toString(StandardCharsets.UTF_8);
+            }
+        } catch (IOException e) {
+            AppLog.error("Failed to diff {} at {} in vault {}: {}", relativePath, commitIsh, vaultId, e.getMessage());
+            throw new VaultGitException("Failed to diff " + relativePath + " at " + commitIsh, e);
+        }
+    }
+
+    private static org.eclipse.jgit.treewalk.AbstractTreeIterator treeIterator(Repository repository, RevTree tree)
+            throws IOException {
+        org.eclipse.jgit.treewalk.CanonicalTreeParser parser = new org.eclipse.jgit.treewalk.CanonicalTreeParser();
+        try (org.eclipse.jgit.lib.ObjectReader reader = repository.newObjectReader()) {
+            parser.reset(reader, tree.getId());
+        }
+        return parser;
     }
 
     /** The full set of (path -> UTF-8 text content) at a given commit-ish. */

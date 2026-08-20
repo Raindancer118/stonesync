@@ -66,6 +66,29 @@ public class VaultEventsHandler extends TextWebSocketHandler implements VaultEve
                 documentId.toString(), path, null, originSessionId));
     }
 
+    @Override
+    public void notifyAccessRevoked(UUID vaultId, UUID userId, UUID documentId, String path) {
+        VaultEventMessage message = new VaultEventMessage(VaultEventMessage.TYPE_ACCESS_REVOKED,
+                documentId == null ? null : documentId.toString(), path, null, null);
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(message);
+        } catch (JsonProcessingException e) {
+            AppLog.error("Failed to serialize access-revoked event for vault {}: {}", vaultId, e.getMessage());
+            return;
+        }
+        for (WebSocketSession session : registry.sessionsFor(vaultId)) {
+            if (session.isOpen() && userId.equals(session.getAttributes().get(VaultWsHandshakeInterceptor.USER_ID_ATTRIBUTE))) {
+                try {
+                    session.sendMessage(new TextMessage(json));
+                } catch (IOException e) {
+                    AppLog.warn("Failed to send access-revoked event to session {}: {}", session.getId(), e.getMessage());
+                }
+            }
+        }
+        AppLog.info("Notified user {} that '{}' in vault {} is no longer accessible to them", userId, path, vaultId);
+    }
+
     private void broadcast(UUID vaultId, VaultEventMessage message) {
         String json;
         try {
