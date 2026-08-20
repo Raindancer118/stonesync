@@ -92,5 +92,19 @@ export class StoneSyncSettingTab extends PluginSettingTab {
 					void this.plugin.downloadEntireVault();
 				})
 			);
+
+		new Setting(containerEl)
+			.setName("Upload entire vault")
+			.setDesc(
+				"Pushes every local file up to the server (never overwrites content the server " +
+					"already has). Use this once to connect an existing vault - with content already " +
+					'in it - to a freshly created, empty server vault. Same as the ' +
+					'"StoneSync: Upload entire vault to server" command.'
+			)
+			.addButton((button) =>
+				button.setButtonText("Upload now").onClick(() => {
+					void this.plugin.uploadEntireVault();
+				})
+			);
 	}
 }

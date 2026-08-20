@@ -4,6 +4,7 @@ import { StoneSyncSettingTab } from "./settings/StoneSyncSettingTab";
 import { SyncManager } from "./sync/SyncManager";
 import { AttachmentSync } from "./attachments/AttachmentSync";
 import { VaultDownloadService } from "./sync/VaultDownloadService";
+import { VaultUploadService } from "./sync/VaultUploadService";
 import { createSyncExtension } from "./editor/syncExtension";
 import { parseConnectParams } from "./onboarding/DeepLinkHandler";
 import { exchangeCode } from "./onboarding/ApiKeyExchangeClient";
@@ -66,6 +67,14 @@ export default class StoneSyncPlugin extends Plugin {
 			name: "Download entire vault from server",
 			callback: () => {
 				void this.downloadEntireVault();
+			},
+		});
+
+		this.addCommand({
+			id: "stonesync-upload-vault",
+			name: "Upload entire vault to server",
+			callback: () => {
+				void this.uploadEntireVault();
 			},
 		});
 
@@ -155,6 +164,26 @@ export default class StoneSyncPlugin extends Plugin {
 			userColor: pickUserColor(this.settings.displayName),
 		});
 		await service.downloadEntireVault();
+	}
+
+	/**
+	 * Manual trigger for the "StoneSync: Upload entire vault to server" command - the mirror of
+	 * `downloadEntireVault`, for connecting an existing local vault (with content already in it)
+	 * to a freshly created, still-empty server vault. Never overwrites content already present
+	 * on the server.
+	 */
+	async uploadEntireVault(): Promise<void> {
+		if (!this.settings.serverUrl || !this.settings.apiKey || !this.settings.vaultId) {
+			new Notice("StoneSync: Please set server URL, API key and vault ID in settings first.");
+			return;
+		}
+		const service = new VaultUploadService({
+			app: this.app,
+			settings: this.settings,
+			userName: this.settings.displayName,
+			userColor: pickUserColor(this.settings.displayName),
+		});
+		await service.uploadEntireVault();
 	}
 
 	/** Synchronizes a single attachment (e.g. callable from a context menu entry). */
