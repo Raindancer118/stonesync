@@ -28,6 +28,9 @@ services:
       STORAGE_PATH: /data/vault
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
       CONSOLE_API_KEY: ${CONSOLE_API_KEY:-}
+      AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID:-}
+      AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:-}
+      PUBLIC_URL: ${PUBLIC_URL:-}
     volumes:
       - stonesync-vault:/data/vault
     networks:
