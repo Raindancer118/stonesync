@@ -1,6 +1,7 @@
 package de.tstieh.stonesync.history;
 
 import de.tstieh.stonesync.admin.VaultAccessService;
+import de.tstieh.stonesync.logging.AppLog;
 import de.tstieh.stonesync.sync.DocumentEntity;
 import de.tstieh.stonesync.sync.DocumentService;
 import de.tstieh.stonesync.sync.RestoreBroadcaster;
@@ -49,6 +50,7 @@ public class RestoreService {
 
     public RestoreResult restore(UUID userId, UUID vaultId, String commitIsh) {
         vaultAccessService.requireAccess(userId, vaultId);
+        AppLog.warn("User {} is restoring vault {} to commit '{}' - this may tombstone documents", userId, vaultId, commitIsh);
 
         Map<String, String> targetFiles = gitRepository.readTreeAtCommit(vaultId, commitIsh);
         Set<String> targetPaths = targetFiles.keySet();
@@ -65,10 +67,14 @@ public class RestoreService {
         for (DocumentService.DocumentSummary document : documentService.listNonDeletedForRestore(vaultId)) {
             if (!targetPaths.contains(document.path())) {
                 documentService.markDeletedForRestore(document.id());
+                AppLog.warn("Tombstoned {} (document {}) during restore of vault {} - not present at commit '{}'",
+                        document.path(), document.id(), vaultId, commitIsh);
                 tombstonedCount++;
             }
         }
 
+        AppLog.info("Restore of vault {} to commit '{}' complete: {} restored, {} tombstoned",
+                vaultId, commitIsh, restoredCount, tombstonedCount);
         return new RestoreResult(restoredCount, tombstonedCount);
     }
 

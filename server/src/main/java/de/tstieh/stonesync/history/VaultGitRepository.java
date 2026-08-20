@@ -1,6 +1,7 @@
 package de.tstieh.stonesync.history;
 
 import de.tstieh.stonesync.attachments.StorageProperties;
+import de.tstieh.stonesync.logging.AppLog;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.api.errors.GitAPIException;
@@ -72,6 +73,7 @@ public class VaultGitRepository {
             git.add().addFilepattern(relativePath).call();
             Status status = git.status().call();
             if (status.isClean()) {
+                AppLog.debug("No-op materialize for {} in vault {} - content unchanged, no commit", relativePath, vaultId);
                 return false;
             }
 
@@ -79,8 +81,10 @@ public class VaultGitRepository {
                     .setMessage("Materialized " + relativePath + " by " + authorEmail + " at " + when)
                     .setAuthor(SYNTHETIC_AUTHOR_NAME, SYNTHETIC_AUTHOR_EMAIL)
                     .call();
+            AppLog.info("Committed {} in vault {} (by {})", relativePath, vaultId, authorEmail);
             return true;
         } catch (IOException | GitAPIException e) {
+            AppLog.error("Failed to materialize {} for vault {}: {}", relativePath, vaultId, e.getMessage());
             throw new VaultGitException("Failed to materialize " + relativePath + " for vault " + vaultId, e);
         } finally {
             lock.unlock();
@@ -116,8 +120,10 @@ public class VaultGitRepository {
                     .setMessage("Deleted " + relativePath + " at " + when)
                     .setAuthor(SYNTHETIC_AUTHOR_NAME, SYNTHETIC_AUTHOR_EMAIL)
                     .call();
+            AppLog.info("Removed {} from vault {}'s git history (real delete)", relativePath, vaultId);
             return true;
         } catch (GitAPIException e) {
+            AppLog.error("Failed to remove {} for vault {}: {}", relativePath, vaultId, e.getMessage());
             throw new VaultGitException("Failed to remove " + relativePath + " for vault " + vaultId, e);
         } finally {
             lock.unlock();
@@ -132,13 +138,16 @@ public class VaultGitRepository {
                 entries.add(new GitLogEntry(commit.getName(), commit.getShortMessage(),
                         Instant.ofEpochSecond(commit.getCommitTime())));
             }
+            AppLog.debug("Read {} log entries for vault {}", entries.size(), vaultId);
             return entries;
         } catch (org.eclipse.jgit.api.errors.NoHeadException e) {
             // A vault whose repo was opened/init'd (e.g. by an earlier no-op materialize call
             // that never actually committed) but has no commits yet - an empty history, not an
             // error.
+            AppLog.debug("Vault {} has no commits yet", vaultId);
             return List.of();
         } catch (GitAPIException e) {
+            AppLog.error("Failed to read git log for vault {}: {}", vaultId, e.getMessage());
             throw new VaultGitException("Failed to read git log for vault " + vaultId, e);
         }
     }
@@ -149,6 +158,7 @@ public class VaultGitRepository {
             Repository repository = git.getRepository();
             ObjectId commitId = repository.resolve(commitIsh);
             if (commitId == null) {
+                AppLog.warn("Restore requested for unknown commit-ish '{}' in vault {}", commitIsh, vaultId);
                 throw new CommitNotFoundException(commitIsh);
             }
 
@@ -166,8 +176,10 @@ public class VaultGitRepository {
                     }
                 }
             }
+            AppLog.info("Read {} files from vault {} at commit {}", files.size(), vaultId, commitIsh);
             return files;
         } catch (IOException e) {
+            AppLog.error("Failed to read tree at {} for vault {}: {}", commitIsh, vaultId, e.getMessage());
             throw new VaultGitException("Failed to read tree at " + commitIsh + " for vault " + vaultId, e);
         }
     }
@@ -191,8 +203,10 @@ public class VaultGitRepository {
             if (Files.exists(dir.resolve(".git"))) {
                 return Git.open(dir.toFile());
             }
+            AppLog.info("Initializing new git history repo for vault {} at {}", vaultId, dir);
             return Git.init().setDirectory(dir.toFile()).call();
         } catch (IOException | GitAPIException e) {
+            AppLog.error("Failed to open/init git repo for vault {}: {}", vaultId, e.getMessage());
             throw new VaultGitException("Failed to open/init git repo for vault " + vaultId, e);
         }
     }

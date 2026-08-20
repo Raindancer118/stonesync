@@ -2,6 +2,7 @@ package de.tstieh.stonesync.invite;
 
 import de.tstieh.stonesync.admin.VaultRole;
 import de.tstieh.stonesync.auth.ApiKeyHasher;
+import de.tstieh.stonesync.logging.AppLog;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,6 +41,8 @@ public class InviteService {
         VaultInviteEntity entity = new VaultInviteEntity(UUID.randomUUID(), vaultId, role,
                 hasher.hash(rawToken), normalize(inviteeEmail), createdBy, now, now.plus(DEFAULT_VALIDITY));
         repository.save(entity);
+        AppLog.info("Created invite {} for vault {} (role {}, invitee {}), expires {}",
+                entity.getId(), vaultId, role, normalize(inviteeEmail), entity.getExpiresAt());
         return rawToken;
     }
 
@@ -54,22 +57,31 @@ public class InviteService {
     @Transactional
     public RedeemedInvite redeem(String rawToken, String verifiedEmail) {
         VaultInviteEntity invite = repository.findByTokenHash(hasher.hash(rawToken))
-                .orElseThrow(() -> new InviteNotFoundException("Unknown invite token"));
+                .orElseThrow(() -> {
+                    AppLog.warn("Invite redemption failed: unknown token");
+                    return new InviteNotFoundException("Unknown invite token");
+                });
 
         Instant now = clock.instant();
         if (invite.isConsumed()) {
+            AppLog.warn("Invite redemption failed: invite {} was already used", invite.getId());
             throw new InviteNoLongerValidException("This invite has already been used");
         }
         if (invite.isExpired(now)) {
+            AppLog.warn("Invite redemption failed: invite {} expired at {}", invite.getId(), invite.getExpiresAt());
             throw new InviteNoLongerValidException("This invite has expired");
         }
         if (!invite.getInviteeEmail().equals(normalize(verifiedEmail))) {
+            AppLog.warn("Invite redemption failed: invite {} was for a different email than the verified '{}'",
+                    invite.getId(), normalize(verifiedEmail));
             throw new InviteEmailMismatchException(
                     "This invite was created for a different email address");
         }
 
         invite.markConsumed(now);
         repository.save(invite);
+        AppLog.info("Invite {} redeemed by {} - granting role {} on vault {}",
+                invite.getId(), normalize(verifiedEmail), invite.getRole(), invite.getVaultId());
         return new RedeemedInvite(invite.getVaultId(), invite.getRole());
     }
 

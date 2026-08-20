@@ -1,5 +1,6 @@
 package de.tstieh.stonesync.auth;
 
+import de.tstieh.stonesync.logging.AppLog;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -34,6 +35,7 @@ public class TicketService {
         UUID ticket = UUID.randomUUID();
         Instant expiresAt = clock.instant().plusSeconds(properties.ttlSeconds());
         tickets.put(ticket, new PendingTicket(userId, expiresAt));
+        AppLog.debug("Issued WS handshake ticket for user {}, valid until {}", userId, expiresAt);
         return ticket;
     }
 
@@ -44,11 +46,14 @@ public class TicketService {
     public Optional<UUID> validateAndConsume(UUID ticket) {
         PendingTicket pending = tickets.remove(ticket);
         if (pending == null) {
+            AppLog.warn("WS handshake ticket rejected: unknown or already-consumed ticket");
             return Optional.empty();
         }
         if (pending.expiresAt().isBefore(clock.instant())) {
+            AppLog.warn("WS handshake ticket rejected: expired at {} (user {})", pending.expiresAt(), pending.userId());
             return Optional.empty();
         }
+        AppLog.debug("WS handshake ticket consumed for user {}", pending.userId());
         return Optional.of(pending.userId());
     }
 

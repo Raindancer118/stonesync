@@ -1,6 +1,7 @@
 package de.tstieh.stonesync.admin;
 
 import de.tstieh.stonesync.auth.ApiKeyHasher;
+import de.tstieh.stonesync.logging.AppLog;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,16 +34,20 @@ public class BootstrapService {
     @Transactional
     public Optional<BootstrapResult> runIfNeeded() {
         if (!properties.isEnabled()) {
+            AppLog.debug("Bootstrap skipped: stonesync.bootstrap.admin-email not set");
             return Optional.empty();
         }
         if (userRepository.count() > 0) {
+            AppLog.debug("Bootstrap skipped: users already exist");
             return Optional.empty();
         }
 
+        AppLog.info("Running first-time bootstrap for admin email '{}'", properties.adminEmail());
         UserEntity user = adminService.createUser(properties.adminEmail(), randomPasswordHash());
         VaultEntity vault = adminService.createVault(properties.vaultName(), user.getId());
         adminService.grantAccess(user.getId(), vault.getId(), VaultRole.OWNER);
         String rawApiKey = adminService.createApiKey(user.getId(), properties.deviceName());
+        AppLog.info("Bootstrap complete: user {}, vault {}", user.getId(), vault.getId());
 
         return Optional.of(new BootstrapResult(user.getId(), vault.getId(), rawApiKey));
     }

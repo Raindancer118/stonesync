@@ -4,6 +4,7 @@ import de.tstieh.stonesync.admin.AdminService;
 import de.tstieh.stonesync.admin.UserEntity;
 import de.tstieh.stonesync.admin.UserRepository;
 import de.tstieh.stonesync.auth.ApiKeyHasher;
+import de.tstieh.stonesync.logging.AppLog;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -59,6 +61,7 @@ public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandle
         }
 
         if (!(pendingToken instanceof String rawToken)) {
+            AppLog.warn("Authentik login succeeded but no pending invite token was found in the session");
             writeErrorPage(response, "No pending invite found for this login. Please use a valid "
                     + "invite link (https://.../invite/&lt;token&gt;) to start.");
             return;
@@ -82,14 +85,16 @@ public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandle
             return;
         }
 
-        UserEntity user = userRepository.findByEmail(email)
-                .orElseGet(() -> adminService.createUser(email, randomPlaceholderPasswordHash()));
+        Optional<UserEntity> existingUser = userRepository.findByEmail(email);
+        UserEntity user = existingUser.orElseGet(() -> adminService.createUser(email, randomPlaceholderPasswordHash()));
+        AppLog.info("Invite onboarding for {}: {} user {}", email, existingUser.isPresent() ? "existing" : "new", user.getId());
 
         adminService.grantAccess(user.getId(), redeemed.vaultId(), redeemed.role());
         String rawApiKey = adminService.createApiKey(user.getId(), "invite-" + UUID.randomUUID());
         String exchangeCode = exchangeService.create(rawApiKey, redeemed.vaultId(), displayName);
 
         String deepLink = DeepLinkBuilder.build(publicUrlProperties.requireUrl(), exchangeCode);
+        AppLog.info("Invite onboarding complete for {} - handing back connect deep link", email);
         writeSuccessPage(response, deepLink, displayName);
     }
 

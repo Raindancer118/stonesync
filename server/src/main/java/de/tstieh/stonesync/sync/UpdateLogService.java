@@ -1,5 +1,6 @@
 package de.tstieh.stonesync.sync;
 
+import de.tstieh.stonesync.logging.AppLog;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -26,16 +27,22 @@ public class UpdateLogService {
 
     public void append(UUID documentId, byte[] updateBytes) {
         repository.save(new YjsUpdateEntity(documentId, updateBytes, clock.instant()));
+        AppLog.debug("Appended a {}-byte update to document {}'s log", updateBytes.length, documentId);
     }
 
     /** True once the append log for a document should be compacted into a snapshot. */
     public boolean exceedsSnapshotThreshold(UUID documentId) {
         long count = repository.countByDocumentId(documentId);
         if (count > properties.snapshotThresholdCount()) {
+            AppLog.debug("Document {} exceeds the snapshot count threshold ({} entries)", documentId, count);
             return true;
         }
         long totalBytes = totalSize(documentId);
-        return totalBytes > properties.snapshotThresholdBytes();
+        boolean exceedsBytes = totalBytes > properties.snapshotThresholdBytes();
+        if (exceedsBytes) {
+            AppLog.debug("Document {} exceeds the snapshot byte threshold ({} bytes)", documentId, totalBytes);
+        }
+        return exceedsBytes;
     }
 
     /**

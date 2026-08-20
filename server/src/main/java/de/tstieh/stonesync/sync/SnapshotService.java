@@ -1,5 +1,6 @@
 package de.tstieh.stonesync.sync;
 
+import de.tstieh.stonesync.logging.AppLog;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +44,7 @@ public class SnapshotService {
     /** Records the log's current high-water mark right before a {@code REQUEST_SNAPSHOT} is sent. */
     public void markPendingSnapshot(UUID documentId, long maxUpdateId) {
         pendingWatermarks.put(documentId, maxUpdateId);
+        AppLog.debug("Marked pending snapshot watermark for document {} at update id {}", documentId, maxUpdateId);
     }
 
     @Transactional
@@ -53,9 +55,14 @@ public class SnapshotService {
         // Only reached if the save above succeeded - crash-safe compaction.
         Long watermark = pendingWatermarks.remove(documentId);
         if (watermark != null) {
-            updateRepository.deleteByDocumentIdAndIdLessThanEqual(documentId, watermark);
+            long deleted = updateRepository.deleteByDocumentIdAndIdLessThanEqual(documentId, watermark);
+            AppLog.info("Compacted document {} into a {}-byte snapshot, pruned {} update log entries up to id {}",
+                    documentId, snapshotBytes.length, deleted, watermark);
+        } else {
+            // No watermark recorded (e.g. an unsolicited snapshot payload): skip deletion rather
+            // than guessing - a future compaction round will clean up once a watermark exists.
+            AppLog.debug("Stored a {}-byte snapshot for document {} without a pending watermark - update log left untouched",
+                    snapshotBytes.length, documentId);
         }
-        // No watermark recorded (e.g. an unsolicited snapshot payload): skip deletion rather
-        // than guessing - a future compaction round will clean up once a watermark exists.
     }
 }

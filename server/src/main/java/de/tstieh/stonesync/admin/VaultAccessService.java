@@ -1,5 +1,6 @@
 package de.tstieh.stonesync.admin;
 
+import de.tstieh.stonesync.logging.AppLog;
 import org.springframework.stereotype.Service;
 
 import java.util.UUID;
@@ -25,7 +26,9 @@ public class VaultAccessService {
 
     public void requireAccess(UUID userId, UUID vaultId) {
         if (!hasAccess(userId, vaultId)) {
+            AppLog.warn("Denied access: user {} has no access to vault {}", userId, vaultId);
             throw new VaultAccessDeniedException("User " + userId + " has no access to vault " + vaultId);
         }
+        AppLog.debug("Access check passed: user {} on vault {}", userId, vaultId);
     }
 }

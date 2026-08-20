@@ -1,5 +1,6 @@
 package de.tstieh.stonesync.history;
 
+import de.tstieh.stonesync.logging.AppLog;
 import de.tstieh.stonesync.sync.DocumentGitEraser;
 import org.springframework.stereotype.Component;
 
@@ -20,6 +21,7 @@ public class GitEraserAdapter implements DocumentGitEraser {
 
     @Override
     public void removeFromGit(UUID vaultId, String path) {
+        AppLog.debug("Erasing {} from vault {}'s git history following a real delete", path, vaultId);
         gitRepository.removeAndCommitIfPresent(vaultId, path, clock.instant());
     }
 }

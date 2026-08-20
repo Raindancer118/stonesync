@@ -17,5 +17,5 @@ public interface YjsUpdateRepository extends JpaRepository<YjsUpdateEntity, Long
     Optional<YjsUpdateEntity> findTopByDocumentIdOrderByIdDesc(UUID documentId);
 
     /** Deletes only the log entries that existed at (or before) a captured snapshot watermark. */
-    void deleteByDocumentIdAndIdLessThanEqual(UUID documentId, Long maxId);
+    long deleteByDocumentIdAndIdLessThanEqual(UUID documentId, Long maxId);
 }

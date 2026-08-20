@@ -63,4 +63,9 @@ stonesync:
 
 logging:
   level:
-    de.tstieh.stonesync: INFO
+    # AppLog uses a single shared logger named "stonesync" everywhere, rather than one
+    # per class - this is the one place to control it. INFO by default: meaningful lifecycle
+    # events (user/vault/document created, invite redeemed, restore performed, ...) are
+    # visible, high-frequency/internal detail (every WS connect, every log-append, every
+    # access check) stays at DEBUG and is silent unless explicitly turned up.
+    stonesync: INFO

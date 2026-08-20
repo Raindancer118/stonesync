@@ -2,6 +2,7 @@ package de.tstieh.stonesync.auth;
 
 import de.tstieh.stonesync.admin.VaultAccessDeniedException;
 import de.tstieh.stonesync.admin.VaultAccessService;
+import de.tstieh.stonesync.logging.AppLog;
 import de.tstieh.stonesync.sync.DocumentNotFoundException;
 import de.tstieh.stonesync.sync.DocumentService;
 import org.springframework.http.HttpStatus;
@@ -48,6 +49,7 @@ public class WsHandshakeInterceptor implements HandshakeInterceptor {
                                     WebSocketHandler wsHandler, Map<String, Object> attributes) {
         Optional<UUID> ticket = extractTicket(request);
         if (ticket.isEmpty()) {
+            AppLog.warn("Rejected WS handshake: no ticket in query string ({})", request.getURI());
             response.setStatusCode(HttpStatus.UNAUTHORIZED);
             return false;
         }
@@ -59,6 +61,7 @@ public class WsHandshakeInterceptor implements HandshakeInterceptor {
 
         UUID documentId = extractDocumentId(request);
         if (documentId == null) {
+            AppLog.warn("Rejected WS handshake: no valid documentId in path ({})", request.getURI());
             response.setStatusCode(HttpStatus.BAD_REQUEST);
             return false;
         }
@@ -67,14 +70,17 @@ public class WsHandshakeInterceptor implements HandshakeInterceptor {
             UUID vaultId = documentService.vaultIdOf(documentId);
             vaultAccessService.requireAccess(userId.get(), vaultId);
         } catch (DocumentNotFoundException e) {
+            AppLog.warn("Rejected WS handshake: unknown document {}", documentId);
             response.setStatusCode(HttpStatus.NOT_FOUND);
             return false;
         } catch (VaultAccessDeniedException e) {
+            AppLog.warn("Rejected WS handshake: user {} has no access to document {}", userId.get(), documentId);
             response.setStatusCode(HttpStatus.FORBIDDEN);
             return false;
         }
 
         attributes.put(USER_ID_ATTRIBUTE, userId.get());
+        AppLog.debug("Accepted WS handshake for user {} on document {}", userId.get(), documentId);
         return true;
     }
 

@@ -1,5 +1,6 @@
 package de.tstieh.stonesync.auth;
 
+import de.tstieh.stonesync.logging.AppLog;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,6 +39,10 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
                 var authentication = new UsernamePasswordAuthenticationToken(
                         userId.get(), null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
+                AppLog.debug("Authenticated request from user {} to {} {}", userId.get(), request.getMethod(), request.getRequestURI());
+            } else {
+                // Never log the raw key itself - only that an unknown/revoked one was tried.
+                AppLog.warn("Rejected request with an unknown or revoked API key: {} {}", request.getMethod(), request.getRequestURI());
             }
         }
         filterChain.doFilter(request, response);

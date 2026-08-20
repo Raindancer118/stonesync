@@ -1,6 +1,7 @@
 package de.tstieh.stonesync.attachments;
 
 import de.tstieh.stonesync.admin.VaultAccessService;
+import de.tstieh.stonesync.logging.AppLog;
 import de.tstieh.stonesync.sync.DocumentService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,7 +41,9 @@ public class AttachmentService {
     }
 
     public boolean isKnown(String contentHash) {
-        return repository.existsByContentHash(contentHash);
+        boolean known = repository.existsByContentHash(contentHash);
+        AppLog.debug("Attachment hash {} known: {}", contentHash, known);
+        return known;
     }
 
     @Transactional
@@ -50,6 +53,8 @@ public class AttachmentService {
 
         String actualHash = sha256Hex(bytes);
         if (!actualHash.equals(contentHash)) {
+            AppLog.warn("Rejected attachment upload for document {}: claimed hash {} did not match actual hash",
+                    documentId, contentHash);
             throw new InvalidAttachmentHashException(
                     "Claimed content hash does not match the actual SHA-256 of the uploaded bytes");
         }
@@ -58,6 +63,7 @@ public class AttachmentService {
         if (existing.isEmpty()) {
             String storagePath = storage.store(contentHash, bytes);
             repository.save(new AttachmentEntity(documentId, contentHash, bytes.length, storagePath, modifiedAt));
+            AppLog.info("Stored new attachment for document {} ({} bytes, hash {})", documentId, bytes.length, contentHash);
             return;
         }
 
@@ -65,11 +71,14 @@ public class AttachmentService {
         if (modifiedAt.isBefore(entity.getModifiedAt())) {
             // Stale/conflicting write loses against the already-stored, newer version - discard
             // without ever touching the filesystem.
+            AppLog.warn("Discarded stale/conflicting attachment upload for document {} (modifiedAt {} is older than stored {})",
+                    documentId, modifiedAt, entity.getModifiedAt());
             return;
         }
         String storagePath = storage.store(contentHash, bytes);
         entity.applyIfNewer(contentHash, bytes.length, storagePath, modifiedAt);
         repository.save(entity);
+        AppLog.info("Updated attachment for document {} ({} bytes, hash {})", documentId, bytes.length, contentHash);
     }
 
     /** Streams back the stored bytes for a document's attachment, after verifying vault access. */
@@ -78,7 +87,11 @@ public class AttachmentService {
         vaultAccessService.requireAccess(userId, vaultId);
 
         AttachmentEntity entity = repository.findById(documentId)
-                .orElseThrow(() -> new AttachmentNotFoundException(documentId));
+                .orElseThrow(() -> {
+                    AppLog.warn("Attachment download requested for unknown document {}", documentId);
+                    return new AttachmentNotFoundException(documentId);
+                });
+        AppLog.debug("Serving attachment download for document {}", documentId);
         return storage.load(entity.getStoragePath());
     }
 

@@ -1,6 +1,7 @@
 package de.tstieh.stonesync.invite;
 
 import de.tstieh.stonesync.auth.ApiKeyHasher;
+import de.tstieh.stonesync.logging.AppLog;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,6 +41,8 @@ public class ApiKeyExchangeService {
         ApiKeyExchangeEntity entity = new ApiKeyExchangeEntity(UUID.randomUUID(), hasher.hash(rawCode), apiKey,
                 vaultId, displayName, now, now.plus(VALIDITY));
         repository.save(entity);
+        // Never log the raw code or the API key itself - only that one was minted.
+        AppLog.info("Minted exchange code for vault {} ({}), valid until {}", vaultId, displayName, entity.getExpiresAt());
         return rawCode;
     }
 
@@ -51,18 +54,24 @@ public class ApiKeyExchangeService {
     @Transactional
     public ExchangedApiKey redeem(String rawCode) {
         ApiKeyExchangeEntity exchange = repository.findByCodeHash(hasher.hash(rawCode))
-                .orElseThrow(() -> new ExchangeNotFoundException("Unknown exchange code"));
+                .orElseThrow(() -> {
+                    AppLog.warn("Exchange code redemption failed: unknown code");
+                    return new ExchangeNotFoundException("Unknown exchange code");
+                });
 
         Instant now = clock.instant();
         if (exchange.isConsumed()) {
+            AppLog.warn("Exchange code redemption failed: already used (vault {})", exchange.getVaultId());
             throw new ExchangeNoLongerValidException("This exchange code has already been used");
         }
         if (exchange.isExpired(now)) {
+            AppLog.warn("Exchange code redemption failed: expired at {} (vault {})", exchange.getExpiresAt(), exchange.getVaultId());
             throw new ExchangeNoLongerValidException("This exchange code has expired");
         }
 
         exchange.markConsumed(now);
         repository.save(exchange);
+        AppLog.info("Exchange code redeemed for vault {} ({})", exchange.getVaultId(), exchange.getDisplayName());
         return new ExchangedApiKey(exchange.getApiKey(), exchange.getVaultId(), exchange.getDisplayName());
     }
 }

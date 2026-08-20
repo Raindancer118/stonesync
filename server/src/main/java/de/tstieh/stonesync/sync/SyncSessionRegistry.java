@@ -1,5 +1,6 @@
 package de.tstieh.stonesync.sync;
 
+import de.tstieh.stonesync.logging.AppLog;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -16,6 +17,7 @@ public class SyncSessionRegistry {
 
     public void register(UUID documentId, WebSocketSession session) {
         sessionsByDocument.computeIfAbsent(documentId, id -> new CopyOnWriteArraySet<>()).add(session);
+        AppLog.debug("Registered session {} for document {}", session.getId(), documentId);
     }
 
     public void unregister(UUID documentId, WebSocketSession session) {
@@ -26,6 +28,7 @@ public class SyncSessionRegistry {
                 sessionsByDocument.remove(documentId, sessions);
             }
         }
+        AppLog.debug("Unregistered session {} for document {}", session.getId(), documentId);
     }
 
     public Set<WebSocketSession> sessionsFor(UUID documentId) {

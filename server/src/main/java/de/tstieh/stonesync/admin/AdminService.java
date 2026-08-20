@@ -3,6 +3,7 @@ package de.tstieh.stonesync.admin;
 import de.tstieh.stonesync.auth.ApiKeyEntity;
 import de.tstieh.stonesync.auth.ApiKeyHasher;
 import de.tstieh.stonesync.auth.ApiKeyRepository;
+import de.tstieh.stonesync.logging.AppLog;
 import de.tstieh.stonesync.sync.DocumentRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,29 +48,43 @@ public class AdminService {
     @Transactional
     public UserEntity createUser(String email, String passwordHash) {
         UserEntity user = new UserEntity(UUID.randomUUID(), email, passwordHash, clock.instant());
-        return userRepository.save(user);
+        userRepository.save(user);
+        AppLog.info("Created user {} ({})", user.getId(), email);
+        return user;
     }
 
     public List<UserEntity> listUsers() {
-        return userRepository.findAll();
+        List<UserEntity> users = userRepository.findAll();
+        AppLog.debug("Listed {} users", users.size());
+        return users;
     }
 
     @Transactional
     public VaultEntity createVault(String name, UUID ownerId) {
         VaultEntity vault = new VaultEntity(UUID.randomUUID(), name, ownerId, clock.instant());
-        return vaultRepository.save(vault);
+        vaultRepository.save(vault);
+        AppLog.info("Created vault {} ('{}') owned by user {}", vault.getId(), name, ownerId);
+        return vault;
     }
 
     public List<VaultEntity> listVaults() {
-        return vaultRepository.findAll();
+        List<VaultEntity> vaults = vaultRepository.findAll();
+        AppLog.debug("Listed {} vaults", vaults.size());
+        return vaults;
     }
 
     @Transactional
     public void grantAccess(UUID userId, UUID vaultId, VaultRole role) {
         accessRepository.findByUserIdAndVaultId(userId, vaultId)
                 .ifPresentOrElse(
-                        existing -> existing.changeRole(role),
-                        () -> accessRepository.save(new UserVaultAccessEntity(UUID.randomUUID(), userId, vaultId, role)));
+                        existing -> {
+                            existing.changeRole(role);
+                            AppLog.info("Changed user {} to role {} on vault {}", userId, role, vaultId);
+                        },
+                        () -> {
+                            accessRepository.save(new UserVaultAccessEntity(UUID.randomUUID(), userId, vaultId, role));
+                            AppLog.info("Granted user {} role {} on vault {}", userId, role, vaultId);
+                        });
     }
 
     /** Creates a new API key/device for a user. Returns the raw key - shown to the caller only once. */
@@ -79,26 +94,38 @@ public class AdminService {
         ApiKeyEntity entity = new ApiKeyEntity(UUID.randomUUID(), userId, deviceName,
                 apiKeyHasher.hash(rawKey), clock.instant());
         apiKeyRepository.save(entity);
+        AppLog.info("Created API key {} ('{}') for user {}", entity.getId(), deviceName, userId);
         return rawKey;
     }
 
     public List<ApiKeyEntity> listApiKeys(UUID userId) {
-        return apiKeyRepository.findByUserId(userId);
+        List<ApiKeyEntity> keys = apiKeyRepository.findByUserId(userId);
+        AppLog.debug("Listed {} API keys for user {}", keys.size(), userId);
+        return keys;
     }
 
     @Transactional
     public void revokeApiKey(UUID apiKeyId) {
         ApiKeyEntity entity = apiKeyRepository.findById(apiKeyId)
-                .orElseThrow(() -> new IllegalArgumentException("Unknown api key: " + apiKeyId));
+                .orElseThrow(() -> {
+                    AppLog.warn("Attempted to revoke unknown API key {}", apiKeyId);
+                    return new IllegalArgumentException("Unknown api key: " + apiKeyId);
+                });
         entity.revoke(clock.instant());
         apiKeyRepository.save(entity);
+        AppLog.info("Revoked API key {} (user {})", apiKeyId, entity.getUserId());
     }
 
     /** Idempotent: removing a grant that doesn't exist is a no-op, matching DELETE semantics. */
     @Transactional
     public void revokeAccess(UUID userId, UUID vaultId) {
         Optional<UserVaultAccessEntity> access = accessRepository.findByUserIdAndVaultId(userId, vaultId);
-        access.ifPresent(accessRepository::delete);
+        if (access.isPresent()) {
+            accessRepository.delete(access.get());
+            AppLog.info("Revoked user {}'s access to vault {}", userId, vaultId);
+        } else {
+            AppLog.debug("No-op: user {} already had no access to vault {}", userId, vaultId);
+        }
     }
 
     /**
@@ -108,10 +135,12 @@ public class AdminService {
     @Transactional
     public void deleteVault(UUID vaultId) {
         if (!documentRepository.findByVaultId(vaultId).isEmpty()) {
+            AppLog.warn("Refused to delete vault {} - it still has documents", vaultId);
             throw new VaultNotEmptyException("Vault " + vaultId + " still has documents - delete those first");
         }
         accessRepository.deleteAll(accessRepository.findByVaultId(vaultId));
         vaultRepository.deleteById(vaultId);
+        AppLog.info("Deleted vault {}", vaultId);
     }
 
     /**
@@ -122,10 +151,12 @@ public class AdminService {
     @Transactional
     public void deleteUser(UUID userId) {
         if (!vaultRepository.findByOwnerId(userId).isEmpty()) {
+            AppLog.warn("Refused to delete user {} - they still own vaults", userId);
             throw new UserOwnsVaultsException("User " + userId + " still owns vaults - transfer or delete those first");
         }
         apiKeyRepository.deleteAll(apiKeyRepository.findByUserId(userId));
         accessRepository.deleteAll(accessRepository.findByUserId(userId));
         userRepository.deleteById(userId);
+        AppLog.info("Deleted user {}", userId);
     }
 }

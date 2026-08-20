@@ -1,7 +1,6 @@
 package de.tstieh.stonesync.sync;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import de.tstieh.stonesync.logging.AppLog;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
@@ -36,8 +35,6 @@ import java.util.UUID;
 public class DocumentSyncHandler extends AbstractWebSocketHandler
         implements DocumentDeletionBroadcaster, RestoreBroadcaster {
 
-    private static final Logger log = LoggerFactory.getLogger(DocumentSyncHandler.class);
-
     private final UpdateLogService updateLogService;
     private final SnapshotService snapshotService;
     private final SyncSessionRegistry registry;
@@ -70,6 +67,7 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
         UUID documentId = documentIdOf(session);
+        AppLog.debug("WS connection established for document {} (session {})", documentId, session.getId());
         registry.register(documentId, session);
 
         Optional<YjsSnapshotEntity> snapshot = snapshotRepository.findById(documentId);
@@ -90,8 +88,10 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
         // this keeps the two "the document's whole life so far" and "then it was restored"
         // stories in the intuitive order.
         restoreQueueService.consumePending(documentId)
-                .ifPresent(content -> sendSafely(session, prefixed(SyncMessageType.RESTORE_CONTENT,
-                        content.getBytes(StandardCharsets.UTF_8))));
+                .ifPresent(content -> {
+                    AppLog.debug("Delivering queued restore content for document {} after catch-up", documentId);
+                    sendSafely(session, prefixed(SyncMessageType.RESTORE_CONTENT, content.getBytes(StandardCharsets.UTF_8)));
+                });
     }
 
     private static byte[] prefixed(byte prefix, byte[] payload) {
@@ -103,7 +103,9 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        registry.unregister(documentIdOf(session), session);
+        UUID documentId = documentIdOf(session);
+        AppLog.debug("WS connection closed for document {} (session {}, status {})", documentId, session.getId(), status);
+        registry.unregister(documentId, session);
     }
 
     @Override
@@ -129,7 +131,7 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
         } else if (prefix == SyncMessageType.SNAPSHOT_PAYLOAD) {
             snapshotService.replaceLogWithSnapshot(documentId, payload);
         } else {
-            log.warn("Unknown sync message prefix {} for document {}", prefix, documentId);
+            AppLog.warn("Unknown sync message prefix {} for document {}", prefix, documentId);
         }
     }
 
@@ -140,11 +142,14 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
      */
     @Override
     public void broadcastDeleteNotice(UUID documentId) {
+        int notified = 0;
         for (WebSocketSession peer : registry.sessionsFor(documentId)) {
             if (peer.isOpen()) {
                 sendSafely(peer, new byte[]{SyncMessageType.DELETE_NOTICE});
+                notified++;
             }
         }
+        AppLog.debug("Broadcast DELETE_NOTICE for document {} to {} connected session(s)", documentId, notified);
     }
 
     /**
@@ -158,15 +163,19 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
         Set<WebSocketSession> sessions = registry.sessionsFor(documentId);
         boolean anyOpen = sessions.stream().anyMatch(WebSocketSession::isOpen);
         if (!anyOpen) {
+            AppLog.debug("Queuing restore content for document {} - no session currently connected", documentId);
             restoreQueueService.enqueue(documentId, content);
             return;
         }
         byte[] frame = prefixed(SyncMessageType.RESTORE_CONTENT, content.getBytes(StandardCharsets.UTF_8));
+        int delivered = 0;
         for (WebSocketSession peer : sessions) {
             if (peer.isOpen()) {
                 sendSafely(peer, frame);
+                delivered++;
             }
         }
+        AppLog.debug("Delivered restore content for document {} live to {} connected session(s)", documentId, delivered);
     }
 
     private void broadcastToOthers(UUID documentId, WebSocketSession sender, byte[] raw) {
@@ -187,6 +196,7 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
                     // appended concurrently while the client builds its reply is never deleted
                     // by the subsequent compaction (see SnapshotService).
                     updateLogService.currentMaxId(documentId).ifPresent(maxId -> snapshotService.markPendingSnapshot(documentId, maxId));
+                    AppLog.debug("Requesting a snapshot from session {} for document {}", target.getId(), documentId);
                     sendSafely(target, new byte[]{SyncMessageType.REQUEST_SNAPSHOT});
                 });
     }
@@ -195,7 +205,7 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
         try {
             session.sendMessage(new BinaryMessage(raw));
         } catch (IOException e) {
-            log.warn("Failed to send sync message to session {}: {}", session.getId(), e.getMessage());
+            AppLog.warn("Failed to send sync message to session {}: {}", session.getId(), e.getMessage());
         }
     }
 

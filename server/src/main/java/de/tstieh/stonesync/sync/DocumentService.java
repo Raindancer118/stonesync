@@ -1,6 +1,7 @@
 package de.tstieh.stonesync.sync;
 
 import de.tstieh.stonesync.admin.VaultAccessService;
+import de.tstieh.stonesync.logging.AppLog;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,8 +41,10 @@ public class DocumentService {
         DocumentEntity document = repository.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
         vaultAccessService.requireAccess(userId, document.getVaultId());
+        String oldPath = document.getCurrentPath();
         document.rename(newPath, clock.instant());
         repository.save(document);
+        AppLog.info("Renamed document {} from '{}' to '{}'", documentId, oldPath, newPath);
     }
 
     @Transactional
@@ -55,6 +58,7 @@ public class DocumentService {
         // A real, user-initiated delete - unlike markDeletedForRestore, this must also erase the
         // document from git history, or a later restore would resurrect it (see DocumentGitEraser).
         gitEraser.removeFromGit(document.getVaultId(), document.getCurrentPath());
+        AppLog.info("Deleted document {} ('{}') by user {}", documentId, document.getCurrentPath(), userId);
     }
 
     /**
@@ -66,10 +70,14 @@ public class DocumentService {
     public UUID resolveOrCreate(UUID userId, UUID vaultId, String path, DocumentEntity.ContentType contentType) {
         vaultAccessService.requireAccess(userId, vaultId);
         return repository.findByVaultIdAndCurrentPath(vaultId, path)
-                .map(DocumentEntity::getId)
+                .map(existing -> {
+                    AppLog.debug("Resolved existing document {} for '{}' in vault {}", existing.getId(), path, vaultId);
+                    return existing.getId();
+                })
                 .orElseGet(() -> {
                     DocumentEntity created = new DocumentEntity(UUID.randomUUID(), vaultId, path, contentType, clock.instant());
                     repository.save(created);
+                    AppLog.info("Created new document {} for '{}' in vault {}", created.getId(), path, vaultId);
                     return created.getId();
                 });
     }
@@ -90,10 +98,12 @@ public class DocumentService {
      */
     public List<DocumentSummary> listDocuments(UUID userId, UUID vaultId) {
         vaultAccessService.requireAccess(userId, vaultId);
-        return repository.findByVaultId(vaultId).stream()
+        List<DocumentSummary> documents = repository.findByVaultId(vaultId).stream()
                 .filter(document -> !document.isDeleted())
                 .map(document -> new DocumentSummary(document.getId(), document.getCurrentPath(), document.getContentType()))
                 .toList();
+        AppLog.debug("Listed {} documents for vault {}", documents.size(), vaultId);
+        return documents;
     }
 
     /** Resolves a document's vault and current path - used by {@code MaterializeService}. */

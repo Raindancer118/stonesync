@@ -1,0 +1,9 @@
+${AnsiColor.CYAN}
+   _____ __                  _____
+  / ___// /_____  ____  ___ / ___/__  ______  _____
+  \__ \/ __/ __ \/ __ \/ _ \\__ \/ / / / __ \/ ___/
+ ___/ / /_/ /_/ / / / /  __/__/ / /_/ / / / / /__
+/____/\__/\____/_/ /_/\___/____/\__, /_/ /_/\___/
+                                /____/${AnsiColor.DEFAULT}
+${AnsiStyle.FAINT}Live multi-user Obsidian vault sync - v${application.version}${AnsiStyle.NORMAL}
+

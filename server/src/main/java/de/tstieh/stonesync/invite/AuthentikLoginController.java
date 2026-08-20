@@ -1,5 +1,6 @@
 package de.tstieh.stonesync.invite;
 
+import de.tstieh.stonesync.logging.AppLog;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
@@ -31,6 +32,7 @@ public class AuthentikLoginController {
                                   HttpServletResponse response) throws IOException {
         HttpSession session = request.getSession(true);
         session.setAttribute(SESSION_KEY_PENDING_INVITE_TOKEN, token);
+        AppLog.debug("Starting Authentik login for a pending invite token");
         response.sendRedirect(request.getContextPath() + "/oauth2/authorization/authentik");
     }
 }

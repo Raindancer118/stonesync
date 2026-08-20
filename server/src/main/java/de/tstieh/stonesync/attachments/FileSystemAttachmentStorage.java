@@ -1,5 +1,6 @@
 package de.tstieh.stonesync.attachments;
 
+import de.tstieh.stonesync.logging.AppLog;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -29,11 +30,14 @@ public class FileSystemAttachmentStorage {
             Path normalizedRoot = root.toAbsolutePath().normalize();
             Path target = normalizedRoot.resolve(contentHash).normalize();
             if (!target.startsWith(normalizedRoot)) {
+                AppLog.error("Rejected attachment path outside the storage root: {}", contentHash);
                 throw new AttachmentStorageException("Rejected attachment path outside the storage root: " + contentHash);
             }
             Files.write(target, bytes);
+            AppLog.debug("Stored {} bytes at {}", bytes.length, target);
             return target.toString();
         } catch (IOException e) {
+            AppLog.error("Failed to store attachment {}: {}", contentHash, e.getMessage());
             throw new AttachmentStorageException("Failed to store attachment " + contentHash, e);
         }
     }
@@ -45,8 +49,11 @@ public class FileSystemAttachmentStorage {
      */
     public byte[] load(String storagePath) {
         try {
-            return Files.readAllBytes(Path.of(storagePath));
+            byte[] bytes = Files.readAllBytes(Path.of(storagePath));
+            AppLog.debug("Loaded {} bytes from {}", bytes.length, storagePath);
+            return bytes;
         } catch (IOException e) {
+            AppLog.error("Failed to read attachment from {}: {}", storagePath, e.getMessage());
             throw new AttachmentStorageException("Failed to read attachment from " + storagePath, e);
         }
     }

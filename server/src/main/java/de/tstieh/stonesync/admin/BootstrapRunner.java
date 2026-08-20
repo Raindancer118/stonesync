@@ -1,15 +1,12 @@
 package de.tstieh.stonesync.admin;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import de.tstieh.stonesync.logging.AppLog;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
 /** Runs {@link BootstrapService} once at application startup and prints the API key, if minted. */
 @Component
 public class BootstrapRunner implements CommandLineRunner {
-
-    private static final Logger log = LoggerFactory.getLogger(BootstrapRunner.class);
 
     private final BootstrapService bootstrapService;
 
@@ -19,7 +16,7 @@ public class BootstrapRunner implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        bootstrapService.runIfNeeded().ifPresent(result -> log.warn("""
+        bootstrapService.runIfNeeded().ifPresent(result -> AppLog.warn("""
 
                 ================================================================
                 StoneSync initial admin bootstrap complete.
