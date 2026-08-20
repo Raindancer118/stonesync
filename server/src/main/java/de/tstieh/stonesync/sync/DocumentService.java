@@ -1,6 +1,9 @@
 package de.tstieh.stonesync.sync;
 
+import de.tstieh.stonesync.access.Permission;
 import de.tstieh.stonesync.admin.VaultAccessService;
+import de.tstieh.stonesync.audit.AuditEventType;
+import de.tstieh.stonesync.audit.AuditService;
 import de.tstieh.stonesync.logging.AppLog;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,16 +29,18 @@ public class DocumentService {
     private final DocumentDeletionBroadcaster deletionBroadcaster;
     private final DocumentGitEraser gitEraser;
     private final VaultEventBroadcaster vaultEventBroadcaster;
+    private final AuditService auditService;
     private final Clock clock;
 
     public DocumentService(DocumentRepository repository, VaultAccessService vaultAccessService,
                             DocumentDeletionBroadcaster deletionBroadcaster, DocumentGitEraser gitEraser,
-                            VaultEventBroadcaster vaultEventBroadcaster, Clock clock) {
+                            VaultEventBroadcaster vaultEventBroadcaster, AuditService auditService, Clock clock) {
         this.repository = repository;
         this.vaultAccessService = vaultAccessService;
         this.deletionBroadcaster = deletionBroadcaster;
         this.gitEraser = gitEraser;
         this.vaultEventBroadcaster = vaultEventBroadcaster;
+        this.auditService = auditService;
         this.clock = clock;
     }
 
@@ -43,10 +48,15 @@ public class DocumentService {
     public void rename(UUID userId, UUID documentId, String newPath) {
         DocumentEntity document = repository.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
-        vaultAccessService.requireAccess(userId, document.getVaultId());
         String oldPath = document.getCurrentPath();
+        // Both ends matter: moving a note out of a folder you may write into one you may not
+        // would otherwise be a way to smuggle content past a path rule (and vice versa).
+        vaultAccessService.requirePathPermission(userId, document.getVaultId(), oldPath, Permission.WRITE);
+        vaultAccessService.requirePathPermission(userId, document.getVaultId(), newPath, Permission.WRITE);
         document.rename(newPath, clock.instant());
         repository.save(document);
+        auditService.record(AuditEventType.DOCUMENT_RENAMED, userId, document.getVaultId(), documentId, newPath, null,
+                "from '" + oldPath + "' to '" + newPath + "'");
         AppLog.info("Renamed document {} from '{}' to '{}'", documentId, oldPath, newPath);
     }
 
@@ -64,7 +74,7 @@ public class DocumentService {
     public void markDeleted(UUID userId, UUID documentId, String originSessionId) {
         DocumentEntity document = repository.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
-        vaultAccessService.requireAccess(userId, document.getVaultId());
+        vaultAccessService.requirePathPermission(userId, document.getVaultId(), document.getCurrentPath(), Permission.WRITE);
         document.markDeleted(clock.instant());
         repository.save(document);
         deletionBroadcaster.broadcastDeleteNotice(documentId);
@@ -72,6 +82,8 @@ public class DocumentService {
         // document from git history, or a later restore would resurrect it (see DocumentGitEraser).
         gitEraser.removeFromGit(document.getVaultId(), document.getCurrentPath());
         vaultEventBroadcaster.notifyDocumentDeleted(document.getVaultId(), documentId, document.getCurrentPath(), originSessionId);
+        auditService.record(AuditEventType.DOCUMENT_DELETED, userId, document.getVaultId(), documentId,
+                document.getCurrentPath(), null, null);
         AppLog.info("Deleted document {} ('{}') by user {}", documentId, document.getCurrentPath(), userId);
     }
 
@@ -92,16 +104,21 @@ public class DocumentService {
     @Transactional
     public UUID resolveOrCreate(UUID userId, UUID vaultId, String path, DocumentEntity.ContentType contentType,
                                  String originSessionId) {
-        vaultAccessService.requireAccess(userId, vaultId);
         return repository.findByVaultIdAndCurrentPath(vaultId, path)
                 .map(existing -> {
+                    // Opening an existing note only needs read access - a VIEWER must be able to
+                    // resolve its id to open the (read-only) sync socket.
+                    vaultAccessService.requirePathPermission(userId, vaultId, path, Permission.READ);
                     AppLog.debug("Resolved existing document {} for '{}' in vault {}", existing.getId(), path, vaultId);
                     return existing.getId();
                 })
                 .orElseGet(() -> {
+                    vaultAccessService.requirePathPermission(userId, vaultId, path, Permission.WRITE);
                     DocumentEntity created = new DocumentEntity(UUID.randomUUID(), vaultId, path, contentType, clock.instant());
                     repository.save(created);
                     vaultEventBroadcaster.notifyDocumentCreated(vaultId, created.getId(), path, contentType, originSessionId);
+                    auditService.record(AuditEventType.DOCUMENT_CREATED, userId, vaultId, created.getId(), path, null,
+                            contentType.name());
                     AppLog.info("Created new document {} for '{}' in vault {}", created.getId(), path, vaultId);
                     return created.getId();
                 });
@@ -122,20 +139,37 @@ public class DocumentService {
      * point of view.
      */
     public List<DocumentSummary> listDocuments(UUID userId, UUID vaultId) {
-        vaultAccessService.requireAccess(userId, vaultId);
+        vaultAccessService.requireVaultPermission(userId, vaultId, Permission.READ);
+        // Filtered per note, not just per vault: a note the caller may not read must not even be
+        // mentioned here - this listing is what drives the client's bulk download, so anything
+        // listed would be pulled onto their disk.
         List<DocumentSummary> documents = repository.findByVaultId(vaultId).stream()
                 .filter(document -> !document.isDeleted())
+                .filter(document -> vaultAccessService.canRead(userId, vaultId, document.getCurrentPath()))
                 .map(document -> new DocumentSummary(document.getId(), document.getCurrentPath(), document.getContentType()))
                 .toList();
         AppLog.debug("Listed {} documents for vault {}", documents.size(), vaultId);
         return documents;
     }
 
-    /** Resolves a document's vault and current path - used by {@code MaterializeService}. */
+    /** Resolves a document's vault and current path, requiring read access. */
     public DocumentLocation locate(UUID userId, UUID documentId) {
+        return locate(userId, documentId, Permission.READ);
+    }
+
+    /**
+     * Same, but for callers that are about to change the document ({@code MaterializeService}) -
+     * writing content through the materialize side-channel must require exactly what editing the
+     * note requires, otherwise it would be a way around the read-only role.
+     */
+    public DocumentLocation locateForWrite(UUID userId, UUID documentId) {
+        return locate(userId, documentId, Permission.WRITE);
+    }
+
+    private DocumentLocation locate(UUID userId, UUID documentId, Permission permission) {
         DocumentEntity document = repository.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
-        vaultAccessService.requireAccess(userId, document.getVaultId());
+        vaultAccessService.requirePathPermission(userId, document.getVaultId(), document.getCurrentPath(), permission);
         return new DocumentLocation(document.getVaultId(), document.getCurrentPath());
     }
 

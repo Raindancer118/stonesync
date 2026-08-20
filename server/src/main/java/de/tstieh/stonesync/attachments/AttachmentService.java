@@ -1,6 +1,9 @@
 package de.tstieh.stonesync.attachments;
 
+import de.tstieh.stonesync.access.Permission;
 import de.tstieh.stonesync.admin.VaultAccessService;
+import de.tstieh.stonesync.audit.AuditEventType;
+import de.tstieh.stonesync.audit.AuditService;
 import de.tstieh.stonesync.logging.AppLog;
 import de.tstieh.stonesync.sync.DocumentService;
 import org.springframework.stereotype.Service;
@@ -31,13 +34,16 @@ public class AttachmentService {
     private final FileSystemAttachmentStorage storage;
     private final DocumentService documentService;
     private final VaultAccessService vaultAccessService;
+    private final AuditService auditService;
 
     public AttachmentService(AttachmentRepository repository, FileSystemAttachmentStorage storage,
-                              DocumentService documentService, VaultAccessService vaultAccessService) {
+                              DocumentService documentService, VaultAccessService vaultAccessService,
+                              AuditService auditService) {
         this.repository = repository;
         this.storage = storage;
         this.documentService = documentService;
         this.vaultAccessService = vaultAccessService;
+        this.auditService = auditService;
     }
 
     public boolean isKnown(String contentHash) {
@@ -48,8 +54,8 @@ public class AttachmentService {
 
     @Transactional
     public void upload(UUID userId, UUID documentId, String contentHash, byte[] bytes, Instant modifiedAt) {
-        UUID vaultId = documentService.vaultIdOf(documentId);
-        vaultAccessService.requireAccess(userId, vaultId);
+        DocumentService.DocumentLocation location = documentService.locateForWrite(userId, documentId);
+        UUID vaultId = location.vaultId();
 
         String actualHash = sha256Hex(bytes);
         if (!actualHash.equals(contentHash)) {
@@ -63,6 +69,8 @@ public class AttachmentService {
         if (existing.isEmpty()) {
             String storagePath = storage.store(contentHash, bytes);
             repository.save(new AttachmentEntity(documentId, contentHash, bytes.length, storagePath, modifiedAt));
+            auditService.record(AuditEventType.ATTACHMENT_UPLOADED, userId, vaultId, documentId, location.path(),
+                    null, bytes.length + " bytes");
             AppLog.info("Stored new attachment for document {} ({} bytes, hash {})", documentId, bytes.length, contentHash);
             return;
         }
@@ -78,13 +86,14 @@ public class AttachmentService {
         String storagePath = storage.store(contentHash, bytes);
         entity.applyIfNewer(contentHash, bytes.length, storagePath, modifiedAt);
         repository.save(entity);
+        auditService.record(AuditEventType.ATTACHMENT_UPLOADED, userId, vaultId, documentId, location.path(), null,
+                bytes.length + " bytes (replaced)");
         AppLog.info("Updated attachment for document {} ({} bytes, hash {})", documentId, bytes.length, contentHash);
     }
 
     /** Streams back the stored bytes for a document's attachment, after verifying vault access. */
     public byte[] download(UUID userId, UUID documentId) {
-        UUID vaultId = documentService.vaultIdOf(documentId);
-        vaultAccessService.requireAccess(userId, vaultId);
+        documentService.locate(userId, documentId); // read access on the attachment's own path
 
         AttachmentEntity entity = repository.findById(documentId)
                 .orElseThrow(() -> {

@@ -7,38 +7,57 @@ Copyright (c) 2026 Tom Stieh. All rights reserved.
    ("the Licensor") and is protected by copyright law and international
    treaties. It is licensed, never sold.
 
-2. No license granted by default
-   No right to use, copy, modify, merge, publish, distribute, sublicense, host
-   as a service, or sell the Software is granted by making this source code
-   readable. Any such right exists only where the Licensor has granted it in a
-   separate, written license agreement, and only within that agreement's terms.
+2. What making the source readable does not grant
+   Publishing this source code grants no rights by itself. Apart from the free
+   license in section 3, any right to use, copy, modify, publish, distribute,
+   sublicense, host as a service, or sell the Software exists only where the
+   Licensor has granted it in a separate written agreement, and only within
+   that agreement's terms.
 
-3. Permitted without a separate agreement
-   a) Reading this source code for evaluation and security review.
-   b) Running the Software for the sole purpose of evaluating it, on
-      infrastructure controlled by the evaluator, for up to 30 days.
-   Neither permission includes production use, redistribution, or offering the
-   Software to third parties in any form.
+3. Free license for private and non-profit use
+   The Licensor grants a worldwide, royalty-free, non-exclusive, non-
+   transferable license to install, run and modify the Software for internal
+   use, to:
+   a) natural persons, for private purposes not connected with a trade,
+      business or profession; and
+   b) non-profit associations and organisations - in particular a German
+      eingetragener Verein (e.V.) or an entity recognised as gemeinnuetzig
+      under sections 51 ff. AO, and comparable non-profit bodies elsewhere -
+      for their own non-commercial work, including for their members.
+   This license covers running the server on your own or rented infrastructure
+   and using the plugin against it. It does not permit redistribution, resale,
+   sublicensing, or operating the Software as a service for anyone outside the
+   private household or the organisation itself.
 
-4. Restrictions
-   Without written permission you may not: remove or alter copyright or license
-   notices; reverse engineer compiled artifacts beyond what applicable law
-   permits regardless of contract; use the Software to build a competing
-   product; or make the Software available to any third party, whether or not
-   for a fee.
+4. Everything else needs a commercial license
+   Any other use requires a separate written agreement with the Licensor. This
+   includes in particular: use by companies, sole traders, freelancers or
+   public bodies in the course of their work; use by a non-profit within a
+   commercial business operation (wirtschaftlicher Geschaeftsbetrieb); offering
+   the Software or access to it to third parties, whether or not for a fee;
+   redistribution in any form; and bundling it with another product or service.
+   Reading this source code for evaluation and security review is always
+   permitted, as is a 30-day evaluation on infrastructure you control.
 
-5. Third-party components
+5. Restrictions that apply to everyone
+   Regardless of which license above applies, you may not: remove or alter
+   copyright or license notices; pass modified or unmodified copies on to third
+   parties; use the Software to build a competing product; or reverse engineer
+   compiled artifacts beyond what applicable law permits regardless of
+   contract. Modifications made under section 3 are for your own use only.
+
+6. Third-party components
    The Software incorporates third-party open-source components, each governed
    by its own license. Those licenses are unaffected by this one and are listed
    in THIRD-PARTY-NOTICES.md. Nothing here restricts rights you have under them.
 
-6. Prior releases
+7. Prior releases
    Versions of the Software published before 20 August 2026 were released under
    the GNU Affero General Public License v3.0. Copies obtained under that
    license remain governed by it for those versions. This license governs every
    version released on or after that date.
 
-7. Warranty and liability
+8. Warranty and liability
    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. TO THE MAXIMUM EXTENT
@@ -48,9 +67,9 @@ Copyright (c) 2026 Tom Stieh. All rights reserved.
    injury to life, body or health, and under the Produkthaftungsgesetz -
    remains unaffected.
 
-8. Governing law
+9. Governing law
    This license is governed by the laws of the Federal Republic of Germany,
    excluding its conflict-of-law rules and the UN Convention on Contracts for
    the International Sale of Goods (CISG).
 
-Commercial licensing: tom560stieh@gmail.com
+Commercial licensing: stonesync@tstieh.de

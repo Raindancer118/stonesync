@@ -8,7 +8,7 @@ Multiple people editing the same vault, at the same time, with live cursors —
 no cloud subscription, no vendor lock-in, self-hosted on hardware you control.
 
 [![CI](https://github.com/Raindancer118/stonesync/actions/workflows/ci.yml/badge.svg)](https://github.com/Raindancer118/stonesync/actions/workflows/ci.yml)
-[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
+[![License: Free for private & non-profit](https://img.shields.io/badge/License-Free%20for%20private%20%26%20non--profit-orange.svg)](LICENSE)
 [![Java 21](https://img.shields.io/badge/server-Java%2021%20%2F%20Spring%20Boot-orange)](server)
 [![Obsidian Plugin](https://img.shields.io/badge/plugin-TypeScript%20%2F%20Yjs-8a2be2)](plugin)
 
@@ -129,10 +129,17 @@ part of this release yet.
 
 ## License
 
-**Proprietary** — see [LICENSE](LICENSE). The source is readable for evaluation and
-security review; production use, redistribution and resale require a written
-commercial license (tom560stieh@gmail.com). Third-party components keep their own
-licenses, listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+**Source-available, proprietary** — see [LICENSE](LICENSE).
+
+* **Free** for private individuals and for non-profit associations (e.V. /
+  gemeinnützige Organisationen) — run the server yourself, use the plugin, modify
+  it for your own use.
+* **Commercial license required** for any business, freelance, or public-sector
+  use, and for offering StoneSync to third parties: stonesync@tstieh.de.
+* Redistribution and resale are not permitted under the free license.
+
+Third-party components keep their own licenses, listed in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 Versions released before 20 August 2026 were published under AGPL-3.0 and stay
 AGPL-3.0 for anyone who obtained them.
