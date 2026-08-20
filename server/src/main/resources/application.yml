@@ -15,28 +15,6 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
-  security:
-    oauth2:
-      client:
-        registration:
-          authentik:
-            client-id: ${AUTHENTIK_CLIENT_ID:}
-            client-secret: ${AUTHENTIK_CLIENT_SECRET:}
-            authorization-grant-type: authorization_code
-            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
-            scope: openid,email,profile
-        provider:
-          authentik:
-            # Explicit endpoint URLs rather than `issuer-uri` auto-discovery: Authentik's
-            # well-known discovery document reports every endpoint as http:// instead of
-            # https:// (a known, pre-existing bug unrelated to this project - see
-            # servers/dorn.md), which would make Spring try to reach the wrong scheme.
-            authorization-uri: ${AUTHENTIK_AUTHORIZE_URI:https://portal.tstieh.de/application/o/authorize/}
-            token-uri: ${AUTHENTIK_TOKEN_URI:https://portal.tstieh.de/application/o/token/}
-            user-info-uri: ${AUTHENTIK_USERINFO_URI:https://portal.tstieh.de/application/o/userinfo/}
-            jwk-set-uri: ${AUTHENTIK_JWKS_URI:https://portal.tstieh.de/application/o/stonesync/jwks/}
-            user-name-attribute: email
-
 server:
   port: ${SERVER_PORT:8080}
   # Without this, Spring builds absolute URLs (like the OAuth2 "{baseUrl}" redirect-uri

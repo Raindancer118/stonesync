@@ -1,0 +1,29 @@
+# Authentik (OAuth2/OIDC) login for the browser-based collaborator-invite flow.
+#
+# Split out of application.yml and only loaded when the `authentik` profile is active, which
+# AuthentikProfileActivator switches on exactly when AUTHENTIK_CLIENT_ID is set. Spring Boot
+# validates every declared client registration at startup and fails hard on an empty client-id,
+# so with these properties always present the server refused to boot for anyone self-hosting
+# without Authentik - i.e. everyone following the README quickstart.
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          authentik:
+            client-id: ${AUTHENTIK_CLIENT_ID:}
+            client-secret: ${AUTHENTIK_CLIENT_SECRET:}
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            scope: openid,email,profile
+        provider:
+          authentik:
+            # Explicit endpoint URLs rather than `issuer-uri` auto-discovery: Authentik's
+            # well-known discovery document reports every endpoint as http:// instead of
+            # https:// (a known, pre-existing bug unrelated to this project - see
+            # servers/dorn.md), which would make Spring try to reach the wrong scheme.
+            authorization-uri: ${AUTHENTIK_AUTHORIZE_URI:https://portal.tstieh.de/application/o/authorize/}
+            token-uri: ${AUTHENTIK_TOKEN_URI:https://portal.tstieh.de/application/o/token/}
+            user-info-uri: ${AUTHENTIK_USERINFO_URI:https://portal.tstieh.de/application/o/userinfo/}
+            jwk-set-uri: ${AUTHENTIK_JWKS_URI:https://portal.tstieh.de/application/o/stonesync/jwks/}
+            user-name-attribute: email

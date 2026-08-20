@@ -1,7 +1,7 @@
 import { Menu, Notice, Plugin, TFile, type TAbstractFile } from "obsidian";
 import { DEFAULT_SETTINGS, type StoneSyncSettings } from "./settings/StoneSyncSettings";
 import { StoneSyncSettingTab } from "./settings/StoneSyncSettingTab";
-import { SyncManager } from "./sync/SyncManager";
+import { SyncManager, type Peer } from "./sync/SyncManager";
 import type { ConnectionStatus } from "./net/StoneSyncSocket";
 import { AttachmentSync } from "./attachments/AttachmentSync";
 import { VaultDownloadService } from "./sync/VaultDownloadService";
@@ -61,6 +61,8 @@ export default class StoneSyncPlugin extends Plugin {
 	private syncManager: SyncManager | null = null;
 	private vaultEventsManager: VaultEventsManager | null = null;
 	private statusBarItemEl: HTMLElement | null = null;
+	private lastStatus: ConnectionStatus | null = null;
+	private lastPeers: Peer[] = [];
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -75,6 +77,11 @@ export default class StoneSyncPlugin extends Plugin {
 		this.vaultEventsManager.start();
 
 		this.registerEditorExtension(createSyncExtension());
+		// Editors that already exist when the plugin loads (Obsidian restores the previous
+		// layout before onload finishes) only pick up a newly registered extension after an
+		// explicit options refresh - without this, the very first bind of an already-open note
+		// would silently have no compartment to reconfigure.
+		this.app.workspace.updateOptions();
 
 		this.addSettingTab(new StoneSyncSettingTab(this.app, this));
 
@@ -86,6 +93,7 @@ export default class StoneSyncPlugin extends Plugin {
 		this.updateStatusBar(null);
 		this.statusBarItemEl.onClickEvent((evt) => this.showActionsMenu(evt));
 		this.syncManager.setStatusListener((status) => this.updateStatusBar(status));
+		this.syncManager.setPresenceListener((peers) => this.updatePresence(peers));
 
 		this.addRibbonIcon("refresh-cw", "StoneSync actions", (evt) => this.showActionsMenu(evt));
 
@@ -127,6 +135,15 @@ export default class StoneSyncPlugin extends Plugin {
 			})
 		);
 
+		// Panes being opened, closed or split change *which* notes are live-synced (every open
+		// Markdown editor gets its own session), so the binding has to be re-evaluated here too -
+		// not only when the focus moves.
+		this.registerEvent(
+			this.app.workspace.on("layout-change", () => {
+				void this.syncManager?.onActiveLeafChange();
+			})
+		);
+
 		this.registerEvent(
 			this.app.vault.on("rename", (file: TAbstractFile, oldPath: string) => {
 				if (file instanceof TFile) {
@@ -149,12 +166,22 @@ export default class StoneSyncPlugin extends Plugin {
 
 	onunload(): void {
 		this.syncManager?.setStatusListener(null);
+		this.syncManager?.setPresenceListener(null);
 		this.syncManager?.teardownAll();
 		this.vaultEventsManager?.stop();
 	}
 
 	private updateStatusBar(status: ConnectionStatus | null): void {
+		this.lastStatus = status;
+		if (status === null) this.lastPeers = [];
 		const { label, cssClass } = describeStatus(status);
+		this.renderStatusBar(label, cssClass);
+	}
+
+	/** Live cursor presence: who else has this note open right now. */
+	private updatePresence(peers: Peer[]): void {
+		this.lastPeers = peers;
+		const { label, cssClass } = describeStatus(this.lastStatus);
 		this.renderStatusBar(label, cssClass);
 	}
 
@@ -168,6 +195,22 @@ export default class StoneSyncPlugin extends Plugin {
 		this.statusBarItemEl.empty();
 		this.statusBarItemEl.createSpan({ cls: `stonesync-status-dot stonesync-status-dot--${cssClass}` });
 		this.statusBarItemEl.createSpan({ text: `StoneSync: ${label}`, cls: "stonesync-status-text" });
+
+		if (this.lastPeers.length === 0) {
+			this.statusBarItemEl.setAttr("aria-label", "StoneSync - nobody else is in this note");
+			return;
+		}
+		const presenceEl = this.statusBarItemEl.createSpan({ cls: "stonesync-presence" });
+		for (const peer of this.lastPeers.slice(0, 5)) {
+			const dot = presenceEl.createSpan({ cls: "stonesync-presence-dot" });
+			dot.style.backgroundColor = peer.color;
+			dot.setAttr("aria-label", peer.name);
+		}
+		presenceEl.createSpan({
+			text: this.lastPeers.length === 1 ? "1 editing" : `${this.lastPeers.length} editing`,
+			cls: "stonesync-presence-text",
+		});
+		this.statusBarItemEl.setAttr("aria-label", `StoneSync - also here: ${this.lastPeers.map((p) => p.name).join(", ")}`);
 	}
 
 	private showActionsMenu(evt: MouseEvent): void {

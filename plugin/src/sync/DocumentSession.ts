@@ -45,6 +45,8 @@ export class DocumentSession {
 	private connected = false;
 	private caughtUpResolvers: Array<() => void> = [];
 	private materializeTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Whether the server's history replay for the *current* connection has already finished. */
+	private caughtUp = false;
 
 	constructor(private readonly options: DocumentSessionOptions) {
 		this.awareness.setLocalStateField("user", {
@@ -58,9 +60,17 @@ export class DocumentSession {
 			getTicket: () => requestTicket(options.serverUrl, options.apiKey),
 			doc: this.doc,
 			awareness: this.awareness,
-			onStatusChange: options.onStatusChange,
+			onStatusChange: (status) => {
+				// A new (or re-established) connection replays history again, so "caught up"
+				// only ever describes the connection that is currently up.
+				if (status === "connecting" || status === "reconnecting") {
+					this.caughtUp = false;
+				}
+				options.onStatusChange?.(status);
+			},
 			onError: options.onError,
 			onCaughtUp: () => {
+				this.caughtUp = true;
 				options.onCaughtUp?.();
 				const resolvers = this.caughtUpResolvers;
 				this.caughtUpResolvers = [];
@@ -99,9 +109,51 @@ export class DocumentSession {
 	 * existing content - not a general "is it caught up right now" query.
 	 */
 	waitUntilCaughtUp(): Promise<void> {
+		if (this.caughtUp) return Promise.resolve();
 		return new Promise((resolve) => {
 			this.caughtUpResolvers.push(resolve);
 		});
+	}
+
+	/**
+	 * Connects (if not connected yet) and resolves once the server's replay burst is done -
+	 * or after `timeoutMs`, so an offline/unreachable server degrades to "bind the editor
+	 * anyway and let the socket reconnect in the background" instead of never binding at all.
+	 */
+	async connectAndWaitUntilCaughtUp(timeoutMs: number): Promise<boolean> {
+		const caughtUp = this.waitUntilCaughtUp();
+		await this.connect();
+		let timer: ReturnType<typeof setTimeout> | null = null;
+		const timeout = new Promise<false>((resolve) => {
+			timer = setTimeout(() => resolve(false), timeoutMs);
+		});
+		try {
+			return await Promise.race([caughtUp.then(() => true), timeout]);
+		} finally {
+			if (timer) clearTimeout(timer);
+		}
+	}
+
+	/**
+	 * Other users currently present in this document (from the Yjs awareness protocol), i.e.
+	 * everyone whose cursor is rendered in the editor right now. Drives the "N others editing"
+	 * indicator; the local client is always excluded.
+	 */
+	peers(): Array<{ name: string; color: string }> {
+		const peers: Array<{ name: string; color: string }> = [];
+		this.awareness.getStates().forEach((state, clientId) => {
+			if (clientId === this.awareness.clientID) return;
+			const user = (state as { user?: { name?: string; color?: string } }).user;
+			if (!user?.name) return;
+			peers.push({ name: user.name, color: user.color ?? "#888888" });
+		});
+		return peers;
+	}
+
+	/** Notifies whenever the set of present collaborators changes (join/leave/cursor move). */
+	onPeersChange(listener: () => void): () => void {
+		this.awareness.on("change", listener);
+		return () => this.awareness.off("change", listener);
 	}
 
 	get documentId(): string {
@@ -143,6 +195,11 @@ export class DocumentSession {
 			this.materializeTimer = null;
 			this.flushMaterialize();
 		}
+		// Announce our departure BEFORE the socket goes away: clearing the local awareness state
+		// emits an update that the still-open socket relays, so collaborators see the cursor
+		// disappear at once. Tearing the socket down first (the previous order) swallowed that
+		// frame and left a ghost cursor around until the 30s awareness timeout expired.
+		this.awareness.setLocalState(null);
 		this.socket.destroy();
 		this.awareness.destroy();
 		this.doc.destroy();

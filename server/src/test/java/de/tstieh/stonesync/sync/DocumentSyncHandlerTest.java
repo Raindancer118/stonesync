@@ -76,6 +76,43 @@ class DocumentSyncHandlerTest {
     }
 
     @Test
+    @DisplayName("a newly connecting client is told about the presence of everyone already in the document")
+    void newClientReceivesExistingAwarenessStates() throws Exception {
+        // The already-connected peer announced itself while it was alone in the document.
+        when(registry.sessionsFor(documentId)).thenReturn(java.util.Set.of(otherClient));
+        when(otherClient.getUri()).thenReturn(URI.create("/ws/sync/" + documentId));
+        handler.handleMessage(otherClient, new BinaryMessage(messageOf(0x01, (byte) 7, (byte) 8)));
+
+        // Now a second client joins. Without a replay of the cached presence frames it would
+        // never learn that anyone else is there - no remote cursor, until that peer happens to
+        // move their cursor again.
+        when(registry.sessionsFor(documentId)).thenReturn(java.util.Set.of(otherClient, sender));
+        handler.afterConnectionEstablished(sender);
+
+        ArgumentCaptor<BinaryMessage> captor = ArgumentCaptor.forClass(BinaryMessage.class);
+        verify(sender, org.mockito.Mockito.atLeastOnce()).sendMessage(captor.capture());
+        assertThat(captor.getAllValues().stream().map(m -> m.getPayload().array()))
+                .anySatisfy(frame -> assertThat(frame).containsExactly(0x01, 7, 8));
+    }
+
+    @Test
+    @DisplayName("presence of a disconnected client is not replayed to later joiners")
+    void awarenessOfClosedSessionIsForgotten() throws Exception {
+        when(registry.sessionsFor(documentId)).thenReturn(java.util.Set.of(otherClient));
+        when(otherClient.getUri()).thenReturn(URI.create("/ws/sync/" + documentId));
+        handler.handleMessage(otherClient, new BinaryMessage(messageOf(0x01, (byte) 7, (byte) 8)));
+        handler.afterConnectionClosed(otherClient, org.springframework.web.socket.CloseStatus.NORMAL);
+
+        lenient().when(registry.sessionsFor(documentId)).thenReturn(java.util.Set.of(sender));
+        handler.afterConnectionEstablished(sender);
+
+        ArgumentCaptor<BinaryMessage> captor = ArgumentCaptor.forClass(BinaryMessage.class);
+        verify(sender, org.mockito.Mockito.atLeastOnce()).sendMessage(captor.capture());
+        assertThat(captor.getAllValues().stream().map(m -> m.getPayload().array()))
+                .noneSatisfy(frame -> assertThat(frame).containsExactly(0x01, 7, 8));
+    }
+
+    @Test
     @DisplayName("0x00 document update is persisted and broadcast to all other clients of the same document")
     void docUpdateIsPersistedAndBroadcastToOthers() throws Exception {
         doReturn(java.util.Set.of(sender, otherClient)).when(registry).sessionsFor(documentId);

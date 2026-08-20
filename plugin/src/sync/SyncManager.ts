@@ -4,6 +4,7 @@ import { DocumentSession } from "./DocumentSession";
 import { DocumentIdResolver } from "./DocumentIdResolver";
 import { deleteDocument } from "./DocumentDeleteClient";
 import { syncCompartment, buildCollabExtension, emptyExtension } from "../editor/syncExtension";
+import { decideReconciliation } from "./reconcile";
 import type { StoneSyncSettings } from "../settings/StoneSyncSettings";
 import { isConfigured } from "../settings/StoneSyncSettings";
 import type { ConnectionStatus } from "../net/StoneSyncSocket";
@@ -13,6 +14,19 @@ interface EditorWithCm {
 	cm: EditorView;
 }
 
+/**
+ * How long to wait for the server's on-connect history replay before binding the editor anyway.
+ * Bounded so an unreachable server never leaves the editor unsynchronized forever - the socket
+ * keeps reconnecting in the background and later updates still arrive through the live path.
+ */
+const CATCH_UP_TIMEOUT_MS = 5000;
+
+/** A collaborator currently present in the bound document (name + cursor color). */
+export interface Peer {
+	name: string;
+	color: string;
+}
+
 function isSyncableFile(file: TFile | null): file is TFile {
 	return !!file && file.extension === "md";
 }
@@ -20,9 +34,12 @@ function isSyncableFile(file: TFile | null): file is TFile {
 export class SyncManager {
 	private readonly sessions = new Map<string, DocumentSession>(); // keyed by vault-relative path
 	private resolver: DocumentIdResolver | null = null;
-	private currentBoundPath: string | null = null;
+	/** Editor currently carrying the collab extension, per vault-relative path. */
+	private readonly boundViews = new Map<string, EditorView>();
 	private shownUnauthorizedNotice = false;
 	private statusListener: ((status: ConnectionStatus | null) => void) | null = null;
+	private presenceListener: ((peers: Peer[]) => void) | null = null;
+	private unsubscribePresence: (() => void) | null = null;
 
 	constructor(
 		private readonly app: App,
@@ -39,6 +56,15 @@ export class SyncManager {
 	 */
 	setStatusListener(listener: ((status: ConnectionStatus | null) => void) | null): void {
 		this.statusListener = listener;
+	}
+
+	/**
+	 * Registers a callback for the collaborators currently present in the bound document (live
+	 * cursor presence, see `DocumentSession.peers`). Fires on every join/leave/cursor move and
+	 * with an empty list when no document is bound.
+	 */
+	setPresenceListener(listener: ((peers: Peer[]) => void) | null): void {
+		this.presenceListener = listener;
 	}
 
 	/** Call after settings changes (server URL, API key, vault ID). */
@@ -75,88 +101,155 @@ export class SyncManager {
 		}
 
 		try {
-			await this.bindActiveEditor();
+			await this.bindOpenEditors();
 			new Notice(`StoneSync: Sync started for "${file.path}".`);
 		} catch (error) {
 			new Notice(`StoneSync: Sync failed – ${errorMessage(error)}`);
 		}
 	}
 
-	/** On active leaf change: bind the editor of the newly active file to its sync session. */
+	/**
+	 * Binds every open Markdown editor to its sync session (and tears down the sessions of notes
+	 * that are no longer open). Called on active-leaf and layout changes.
+	 *
+	 * Deliberately not limited to the *active* pane any more: with only the active editor bound,
+	 * a note visible in a second pane - or simply open in the background on the other device -
+	 * silently stopped receiving collaborators' edits, which is exactly what "I changed it here
+	 * and saw nothing over there" looked like in practice.
+	 */
 	async onActiveLeafChange(): Promise<void> {
 		const settings = this.getSettings();
 		if (!settings.syncEnabled || !isConfigured(settings)) return;
-		await this.bindActiveEditor();
+		await this.bindOpenEditors();
 	}
 
-	private async bindActiveEditor(): Promise<void> {
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		const cm = view ? (view.editor as unknown as EditorWithCm).cm : undefined;
-		const file = view?.file ?? null;
+	/** Editors of all currently open Markdown leaves, one entry per distinct file. */
+	private openMarkdownEditors(): Array<{ file: TFile; cm: EditorView }> {
+		const seen = new Set<string>();
+		const result: Array<{ file: TFile; cm: EditorView }> = [];
+		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+			const view = leaf.view;
+			if (!(view instanceof MarkdownView)) continue;
+			const file = view.file;
+			if (!isSyncableFile(file) || seen.has(file.path)) continue;
+			const cm = (view.editor as unknown as EditorWithCm).cm;
+			if (!cm) continue;
+			// Obsidian keeps multiple views of the same file in sync with each other, so binding
+			// the first one is enough - and binding two views to one awareness would make them
+			// fight over the local cursor position.
+			seen.add(file.path);
+			result.push({ file, cm });
+		}
+		return result;
+	}
 
-		if (!view || !cm || !isSyncableFile(file)) {
-			this.unbindCurrent();
-			return;
+	private async bindOpenEditors(): Promise<void> {
+		const open = this.openMarkdownEditors();
+		const openPaths = new Set(open.map((entry) => entry.file.path));
+
+		for (const path of [...this.boundViews.keys()]) {
+			if (!openPaths.has(path)) this.unbind(path);
 		}
 
-		if (this.currentBoundPath === file.path) return; // already bound
-		this.unbindCurrent();
+		for (const { file, cm } of open) {
+			if (this.boundViews.get(file.path) === cm) continue; // already bound to this very editor
+			try {
+				await this.bindEditor(file, cm);
+			} catch (error) {
+				console.error("[StoneSync] Failed to bind editor for", file.path, error);
+			}
+		}
 
+		this.refreshActiveIndicators();
+	}
+
+	private async bindEditor(file: TFile, cm: EditorView): Promise<void> {
 		const session = await this.getOrCreateSession(file);
-
-		// Reconciliation: ensure editor content and Y.Text match before the
-		// live binding (yCollab only syncs future changes, no initial
-		// reconciliation).
 		const localContent = await this.app.vault.read(file);
 
-		// Race guard: during the two awaits above, the user may already have switched to
-		// another file (Obsidian reuses the same CM6 editor for the new file). Without this
-		// check, file B's editor would get overwritten with file A's content/session ->
-		// data corruption. Re-fetch instead of reusing the `view`/`cm` cached above, since
-		// they may have already been swapped out in the meantime by a more recent call.
-		const stillActiveView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		const stillCm = stillActiveView ? (stillActiveView.editor as unknown as EditorWithCm).cm : undefined;
-		if (!stillActiveView || !stillCm || stillActiveView.file?.path !== file.path) {
-			return;
+		// Connect and let the server replay this document's history BEFORE deciding whether the
+		// document still needs seeding. Doing it the other way round (the previous behavior) made
+		// every device insert its own copy of an already-shared file into the CRDT, so opening the
+		// same note on a second device duplicated its entire content instead of syncing it.
+		await session.connectAndWaitUntilCaughtUp(CATCH_UP_TIMEOUT_MS);
+
+		// Race guard: during the awaits above the leaf may have been closed or switched to a
+		// different file (Obsidian reuses the same CM6 editor for the new file). Writing this
+		// file's content into that editor would corrupt the other note, so verify the editor is
+		// still showing exactly this file before touching it.
+		if (!this.editorStillShows(file, cm)) return;
+
+		const reconciliation = decideReconciliation(session.ytext.toString(), cm.state.doc.toString());
+		if (reconciliation.action === "seed") {
+			session.seedIfEmpty(reconciliation.content || localContent);
+		} else if (reconciliation.action === "replaceEditor") {
+			cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: reconciliation.content } });
 		}
 
-		if (session.ytext.length === 0) {
-			session.seedIfEmpty(localContent);
-		} else if (session.ytext.toString() !== stillCm.state.doc.toString()) {
-			stillCm.dispatch({
-				changes: { from: 0, to: stillCm.state.doc.length, insert: session.ytext.toString() },
-			});
-		}
+		cm.dispatch({ effects: syncCompartment.reconfigure(buildCollabExtension(session)) });
+		this.boundViews.set(file.path, cm);
+	}
 
-		stillCm.dispatch({ effects: syncCompartment.reconfigure(buildCollabExtension(session)) });
-		this.currentBoundPath = file.path;
-		this.statusListener?.(session.getStatus());
-
-		await session.connect();
+	private editorStillShows(file: TFile, cm: EditorView): boolean {
+		return this.openMarkdownEditors().some((entry) => entry.file.path === file.path && entry.cm === cm);
 	}
 
 	/**
-	 * Detaches the sync extension from the current editor AND closes the associated
-	 * DocumentSession (WebSocket + Y.Doc + awareness). Without this destroy call, every
-	 * file ever opened would keep an open WS connection in the background forever
-	 * (resource leak) - acceptable since this MVP only binds to the currently active
-	 * editor pane anyway (no multi-pane sync); reconnecting when a file is reopened
-	 * is cheap (ticket handshake + delta resync).
+	 * Pushes connection status + collaborator presence of the *active* note to the UI listeners.
+	 * Sessions for background notes keep syncing, they just aren't what the status bar describes.
 	 */
-	private unbindCurrent(): void {
-		if (!this.currentBoundPath) return;
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		const cm = view ? (view.editor as unknown as EditorWithCm).cm : undefined;
-		if (cm) {
-			cm.dispatch({ effects: syncCompartment.reconfigure(emptyExtension()) });
+	private refreshActiveIndicators(): void {
+		const activePath = this.app.workspace.getActiveFile()?.path ?? null;
+		const session = activePath ? this.sessions.get(activePath) : undefined;
+
+		this.unsubscribePresence?.();
+		this.unsubscribePresence = null;
+
+		if (!session || !activePath || !this.boundViews.has(activePath)) {
+			this.statusListener?.(null);
+			this.presenceListener?.([]);
+			return;
 		}
-		const session = this.sessions.get(this.currentBoundPath);
+
+		this.statusListener?.(session.getStatus());
+		const emit = () => this.presenceListener?.(session.peers());
+		this.unsubscribePresence = session.onPeersChange(emit);
+		emit();
+	}
+
+	/**
+	 * Detaches the sync extension from one note's editor AND closes its DocumentSession
+	 * (WebSocket + Y.Doc + awareness). Without this, every file ever opened would keep an open
+	 * WS connection around forever; reconnecting when a note is reopened is cheap (ticket
+	 * handshake + delta resync).
+	 */
+	private unbind(path: string): void {
+		const cm = this.boundViews.get(path);
+		if (cm) {
+			try {
+				cm.dispatch({ effects: syncCompartment.reconfigure(emptyExtension()) });
+			} catch (error) {
+				// The editor may already be destroyed together with its (now closed) leaf.
+				console.debug("[StoneSync] Could not detach sync extension for", path, error);
+			}
+		}
+		this.boundViews.delete(path);
+
+		const session = this.sessions.get(path);
 		if (session) {
 			session.destroy();
-			this.sessions.delete(this.currentBoundPath);
+			this.sessions.delete(path);
 		}
-		this.currentBoundPath = null;
+	}
+
+	private unbindAll(): void {
+		for (const path of [...this.boundViews.keys()]) {
+			this.unbind(path);
+		}
+		this.unsubscribePresence?.();
+		this.unsubscribePresence = null;
 		this.statusListener?.(null);
+		this.presenceListener?.([]);
 	}
 
 	private async getOrCreateSession(file: TFile): Promise<DocumentSession> {
@@ -181,7 +274,7 @@ export class SyncManager {
 							"Please check it in settings. Sync has been stopped."
 					);
 				}
-				if (this.currentBoundPath === file.path) {
+				if (this.app.workspace.getActiveFile()?.path === file.path) {
 					this.statusListener?.(status);
 				}
 			},
@@ -215,15 +308,8 @@ export class SyncManager {
 	private async handleRemoteDeleteNotice(path: string): Promise<void> {
 		const wasActiveFile = this.app.workspace.getActiveFile()?.path === path;
 
-		if (this.currentBoundPath === path) {
-			this.unbindCurrent();
-		} else {
-			const session = this.sessions.get(path);
-			if (session) {
-				session.destroy();
-				this.sessions.delete(path);
-			}
-		}
+		this.unbind(path);
+		this.refreshActiveIndicators();
 		this.resolver?.forget(path);
 
 		if (wasActiveFile) {
@@ -252,8 +338,10 @@ export class SyncManager {
 			this.sessions.set(file.path, session);
 		}
 		this.resolver?.rename(oldPath, file.path);
-		if (this.currentBoundPath === oldPath) {
-			this.currentBoundPath = file.path;
+		const boundView = this.boundViews.get(oldPath);
+		if (boundView) {
+			this.boundViews.delete(oldPath);
+			this.boundViews.set(file.path, boundView);
 		}
 	}
 
@@ -266,11 +354,8 @@ export class SyncManager {
 		const settings = this.getSettings();
 		const documentId = this.resolver?.peekId(path);
 
-		const session = this.sessions.get(path);
-		if (session) {
-			session.destroy();
-			this.sessions.delete(path);
-		}
+		this.unbind(path);
+		this.refreshActiveIndicators();
 		this.resolver?.forget(path);
 
 		if (!documentId || !isConfigured(settings)) return;
@@ -283,7 +368,7 @@ export class SyncManager {
 	}
 
 	teardownAll(): void {
-		this.unbindCurrent();
+		this.unbindAll();
 		for (const session of this.sessions.values()) {
 			session.destroy();
 		}

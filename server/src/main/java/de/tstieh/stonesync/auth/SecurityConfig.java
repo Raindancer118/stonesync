@@ -3,6 +3,7 @@ package de.tstieh.stonesync.auth;
 import de.tstieh.stonesync.invite.AuthentikLoginSuccessHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -32,6 +33,7 @@ public class SecurityConfig {
      */
     @Bean
     @Order(1)
+    @Profile(AuthentikProfileActivator.PROFILE)
     public SecurityFilterChain oauthLoginFilterChain(HttpSecurity http, AuthentikLoginSuccessHandler successHandler)
             throws Exception {
         http
@@ -41,6 +43,23 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().permitAll())
                 .oauth2Login(oauth2 -> oauth2.successHandler(successHandler));
+        return http.build();
+    }
+
+    /**
+     * Same URL space without Authentik configured (see {@link AuthentikProfileActivator}): the
+     * OAuth2 login itself is unavailable, but {@code /api/auth/exchange} must keep working as an
+     * unauthenticated endpoint - otherwise it would fall through to {@link ApiKeyAuthFilter} and
+     * demand the very credential it exists to hand out.
+     */
+    @Bean
+    @Order(1)
+    @Profile("!" + AuthentikProfileActivator.PROFILE)
+    public SecurityFilterChain inviteExchangeOnlyFilterChain(HttpSecurity http) throws Exception {
+        http
+                .securityMatcher("/login/**", "/oauth2/**", "/invite/**", "/api/auth/exchange")
+                .csrf(csrf -> csrf.disable())
+                .authorizeHttpRequests(authorize -> authorize.anyRequest().permitAll());
         return http.build();
     }
 

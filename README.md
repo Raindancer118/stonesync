@@ -91,9 +91,33 @@ npm test
 npm run build
 ```
 
-Copy `main.js` and `manifest.json` into
+Copy `main.js`, `manifest.json` and `styles.css` into
 `<your-vault>/.obsidian/plugins/stonesync/`, then enable the plugin in
 Obsidian's settings and point it at your server + API key.
+
+### See it working
+
+```bash
+cd plugin
+npm test                                    # unit tests (incl. the CM6/editor binding)
+STONESYNC_URL=http://localhost:8080 \
+STONESYNC_API_KEY=... STONESYNC_VAULT_ID=... npm run test:e2e
+```
+
+The end-to-end suite drives two real clients against a running server: edits in both
+directions, live cursor presence appearing and disappearing, and a late joiner catching up
+on the full history.
+
+## What "live" means here
+
+* Every **open** Markdown editor gets its own sync session - not just the focused pane, so a
+  note sitting in a background tab (or on the other device's screen) keeps receiving edits.
+* Remote cursors and selections are rendered inline, with each collaborator's name and color;
+  the status bar shows who else is in the current note.
+* Presence is announced to newcomers too, so someone joining a note sees the people already
+  in it immediately, instead of only once they move their cursor.
+* Notes you do *not* have open are not rewritten under you - they sync the moment you open
+  them (creations and deletions still arrive live, vault-wide).
 
 ## Status
 

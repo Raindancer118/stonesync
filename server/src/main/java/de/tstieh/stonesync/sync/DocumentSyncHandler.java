@@ -15,6 +15,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The sync WebSocket endpoint: a "dumb" binary relay + persistence layer for Yjs updates.
@@ -41,6 +43,17 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
     private final YjsSnapshotRepository snapshotRepository;
     private final YjsUpdateRepository updateRepository;
     private final DocumentRestoreQueueService restoreQueueService;
+    /**
+     * Last awareness (presence/cursor) frame each session sent, keyed by session id.
+     *
+     * <p>Awareness is ephemeral and never persisted - but it is also only ever sent when it
+     * *changes*. A client that announces itself while alone in a document therefore stays
+     * invisible to everyone who connects later: they would only see a cursor once that peer
+     * happens to move it again. Caching the last frame per session (still an opaque blob - the
+     * server does not parse it) lets a newcomer be told who is already here, which is what makes
+     * live cursors show up immediately instead of eventually.</p>
+     */
+    private final Map<String, byte[]> lastAwarenessBySession = new ConcurrentHashMap<>();
 
     public DocumentSyncHandler(UpdateLogService updateLogService, SnapshotService snapshotService,
                                 SyncSessionRegistry registry, YjsSnapshotRepository snapshotRepository,
@@ -82,6 +95,8 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
 
         sendSafely(session, new byte[]{SyncMessageType.CAUGHT_UP});
 
+        replayPresenceTo(documentId, session);
+
         // Delivered right after the catch-up burst (not before, not interleaved with it) so a
         // reconnecting client always has the full prior history applied before the corrective
         // restore replaces it - order doesn't matter for Yjs CRDT correctness either way, but
@@ -92,6 +107,19 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
                     AppLog.debug("Delivering queued restore content for document {} after catch-up", documentId);
                     sendSafely(session, prefixed(SyncMessageType.RESTORE_CONTENT, content.getBytes(StandardCharsets.UTF_8)));
                 });
+    }
+
+    /** Announces everyone already present in this document to a session that just joined. */
+    private void replayPresenceTo(UUID documentId, WebSocketSession session) {
+        for (WebSocketSession peer : registry.sessionsFor(documentId)) {
+            if (peer.getId().equals(session.getId())) {
+                continue;
+            }
+            byte[] presence = lastAwarenessBySession.get(peer.getId());
+            if (presence != null) {
+                sendSafely(session, presence);
+            }
+        }
     }
 
     private static byte[] prefixed(byte prefix, byte[] payload) {
@@ -106,6 +134,7 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
         UUID documentId = documentIdOf(session);
         AppLog.debug("WS connection closed for document {} (session {}, status {})", documentId, session.getId(), status);
         registry.unregister(documentId, session);
+        lastAwarenessBySession.remove(session.getId());
     }
 
     @Override
@@ -127,6 +156,7 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
                 requestSnapshotFromAnyClient(documentId);
             }
         } else if (prefix == SyncMessageType.AWARENESS) {
+            lastAwarenessBySession.put(session.getId(), raw);
             broadcastToOthers(documentId, session, raw);
         } else if (prefix == SyncMessageType.SNAPSHOT_PAYLOAD) {
             snapshotService.replaceLogWithSnapshot(documentId, payload);

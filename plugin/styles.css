@@ -32,3 +32,23 @@
 .stonesync-status-dot--error {
 	background-color: var(--color-red, #e93147);
 }
+
+.stonesync-presence {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25em;
+	margin-left: 0.5em;
+}
+
+.stonesync-presence-dot {
+	display: inline-block;
+	width: 0.55em;
+	height: 0.55em;
+	border-radius: 50%;
+	border: 1px solid var(--background-primary);
+}
+
+.stonesync-presence-text {
+	color: var(--text-muted);
+	font-size: 0.9em;
+}

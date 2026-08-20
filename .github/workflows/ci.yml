@@ -39,9 +39,72 @@ jobs:
       - name: Typecheck
         working-directory: plugin
         run: npm run typecheck
-      - name: Test
-        working-directory: plugin
-        run: npm test -- --run
+      # Build before Test on purpose: one of the unit tests inspects the produced bundle to
+      # make sure Obsidian's own CodeMirror is never bundled a second time (that regression
+      # silently disabled live sync and remote cursors entirely).
       - name: Build
         working-directory: plugin
         run: npm run build
+      - name: Test
+        working-directory: plugin
+        run: npm test -- --run
+
+  e2e:
+    name: End-to-end (plugin <-> server)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: stonesync
+          POSTGRES_USER: stonesync
+          POSTGRES_PASSWORD: e2e-secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U stonesync -d stonesync"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+      - name: Package server
+        working-directory: server
+        run: mvn -B package -DskipTests
+      - name: Start server
+        working-directory: server
+        env:
+          DB_URL: jdbc:postgresql://localhost:5432/stonesync
+          DB_USER: stonesync
+          DB_PASSWORD: e2e-secret
+          STORAGE_PATH: ${{ runner.temp }}/stonesync-vault
+          BOOTSTRAP_ADMIN_EMAIL: e2e@example.com
+        run: |
+          mkdir -p "$STORAGE_PATH"
+          nohup java -jar target/stonesync-server.jar > "$RUNNER_TEMP/server.log" 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8080/actuator/health && break
+            sleep 2
+          done
+          echo "STONESYNC_API_KEY=$(grep -oP '(?<=API key: )\S+' "$RUNNER_TEMP/server.log" | head -1)" >> "$GITHUB_ENV"
+          echo "STONESYNC_VAULT_ID=$(grep -oP '(?<=vaultId: )\S+' "$RUNNER_TEMP/server.log" | head -1)" >> "$GITHUB_ENV"
+          echo "STONESYNC_URL=http://localhost:8080" >> "$GITHUB_ENV"
+      - name: Install plugin deps
+        working-directory: plugin
+        run: npm ci --legacy-peer-deps
+      - name: Run end-to-end suite
+        working-directory: plugin
+        run: npm run test:e2e
+      - name: Server log
+        if: failure()
+        run: cat "$RUNNER_TEMP/server.log"
