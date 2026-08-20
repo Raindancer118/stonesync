@@ -12,6 +12,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -161,5 +162,48 @@ class DocumentServiceTest {
 
         verify(repository, never()).findByVaultIdAndCurrentPath(any(), any());
         verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("listing documents without vault access fails before the repository is ever queried (IDOR protection)")
+    void listDocumentsWithoutVaultAccessIsDenied() {
+        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+
+        assertThatThrownBy(() -> service.listDocuments(userId, vaultId))
+                .isInstanceOf(VaultAccessDeniedException.class);
+
+        verify(repository, never()).findByVaultId(any());
+    }
+
+    @Test
+    @DisplayName("listing documents excludes tombstoned (deleted) documents")
+    void listDocumentsExcludesDeletedDocuments() {
+        DocumentEntity alive = new DocumentEntity(documentId, vaultId, "notes/a.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
+        DocumentEntity deleted = new DocumentEntity(UUID.randomUUID(), vaultId, "notes/b.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
+        deleted.markDeleted(Instant.parse("2025-12-15T00:00:00Z"));
+        when(repository.findByVaultId(vaultId)).thenReturn(List.of(alive, deleted));
+
+        List<DocumentService.DocumentSummary> result = service.listDocuments(userId, vaultId);
+
+        assertThat(result).extracting(DocumentService.DocumentSummary::id).containsExactly(documentId);
+    }
+
+    @Test
+    @DisplayName("listing documents returns the correct id, path and content type for each non-deleted document")
+    void listDocumentsReturnsCorrectData() {
+        DocumentEntity textDoc = new DocumentEntity(documentId, vaultId, "notes/a.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
+        UUID attachmentId = UUID.randomUUID();
+        DocumentEntity attachmentDoc = new DocumentEntity(attachmentId, vaultId, "images/pic.png",
+                DocumentEntity.ContentType.ATTACHMENT, Instant.parse("2025-12-01T00:00:00Z"));
+        when(repository.findByVaultId(vaultId)).thenReturn(List.of(textDoc, attachmentDoc));
+
+        List<DocumentService.DocumentSummary> result = service.listDocuments(userId, vaultId);
+
+        assertThat(result).containsExactlyInAnyOrder(
+                new DocumentService.DocumentSummary(documentId, "notes/a.md", DocumentEntity.ContentType.TEXT),
+                new DocumentService.DocumentSummary(attachmentId, "images/pic.png", DocumentEntity.ContentType.ATTACHMENT));
     }
 }

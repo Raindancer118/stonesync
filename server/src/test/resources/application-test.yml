@@ -4,6 +4,17 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
+  security:
+    oauth2:
+      client:
+        registration:
+          authentik:
+            # Test-only stub: OAuth2ClientAutoConfiguration refuses to start with an empty
+            # client-id (see application.yml's ${AUTHENTIK_CLIENT_ID:} default), which would
+            # otherwise fail every @SpringBootTest's context load. Never used to reach a real
+            # Authentik instance in tests.
+            client-id: test-client-id
+            client-secret: test-client-secret
 
 stonesync:
   ticket:

@@ -72,6 +72,16 @@ public class AttachmentService {
         repository.save(entity);
     }
 
+    /** Streams back the stored bytes for a document's attachment, after verifying vault access. */
+    public byte[] download(UUID userId, UUID documentId) {
+        UUID vaultId = documentService.vaultIdOf(documentId);
+        vaultAccessService.requireAccess(userId, vaultId);
+
+        AttachmentEntity entity = repository.findById(documentId)
+                .orElseThrow(() -> new AttachmentNotFoundException(documentId));
+        return storage.load(entity.getStoragePath());
+    }
+
     private static String sha256Hex(byte[] bytes) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

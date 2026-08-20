@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -73,5 +74,23 @@ public class DocumentService {
         return repository.findById(documentId)
                 .map(DocumentEntity::getVaultId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
+    }
+
+    /**
+     * Lists every non-deleted document of a vault - the basis for a bulk vault download (a
+     * freshly connected client needs to know the full set of (id, path, contentType) tuples
+     * before it can open a {@code DocumentSession} per file or download each attachment).
+     * Tombstoned documents are deliberately excluded: they no longer exist from the client's
+     * point of view.
+     */
+    public List<DocumentSummary> listDocuments(UUID userId, UUID vaultId) {
+        vaultAccessService.requireAccess(userId, vaultId);
+        return repository.findByVaultId(vaultId).stream()
+                .filter(document -> !document.isDeleted())
+                .map(document -> new DocumentSummary(document.getId(), document.getCurrentPath(), document.getContentType()))
+                .toList();
+    }
+
+    public record DocumentSummary(UUID id, String path, DocumentEntity.ContentType contentType) {
     }
 }

@@ -37,4 +37,17 @@ public class FileSystemAttachmentStorage {
             throw new AttachmentStorageException("Failed to store attachment " + contentHash, e);
         }
     }
+
+    /**
+     * Reads back the bytes at a previously stored path (as recorded in {@link AttachmentEntity#getStoragePath()}).
+     * The path comes from our own database, not from user input, so no further traversal check is needed here -
+     * the one at {@link #store} is what keeps a bad path from ever being persisted in the first place.
+     */
+    public byte[] load(String storagePath) {
+        try {
+            return Files.readAllBytes(Path.of(storagePath));
+        } catch (IOException e) {
+            throw new AttachmentStorageException("Failed to read attachment from " + storagePath, e);
+        }
+    }
 }

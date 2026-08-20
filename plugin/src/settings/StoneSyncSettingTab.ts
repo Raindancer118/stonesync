@@ -79,5 +79,18 @@ export class StoneSyncSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				})
 			);
+
+		new Setting(containerEl)
+			.setName("Download entire vault")
+			.setDesc(
+				"Fetches every document that exists on the server but not yet locally " +
+					"(never overwrites existing local files). Same as the " +
+					'"StoneSync: Download entire vault from server" command.'
+			)
+			.addButton((button) =>
+				button.setButtonText("Download now").onClick(() => {
+					void this.plugin.downloadEntireVault();
+				})
+			);
 	}
 }

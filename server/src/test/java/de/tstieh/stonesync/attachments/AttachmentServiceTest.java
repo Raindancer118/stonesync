@@ -7,9 +7,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -147,6 +150,47 @@ class AttachmentServiceTest {
 
         verify(storage, never()).store(any(), any());
         verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("downloading without vault access fails before any bytes are ever read (IDOR protection)")
+    void downloadWithoutVaultAccessIsDenied() {
+        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+
+        assertThatThrownBy(() -> service.download(userId, documentId))
+                .isInstanceOf(VaultAccessDeniedException.class);
+
+        verify(repository, never()).findById(any());
+    }
+
+    @Test
+    @DisplayName("downloading a document with no stored attachment fails with a clean, dedicated error")
+    void downloadOfNonExistentAttachmentFailsCleanly() {
+        when(repository.findById(documentId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.download(userId, documentId))
+                .isInstanceOf(AttachmentNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("download reads back the exact bytes that were stored, round-tripped through the real filesystem storage")
+    void downloadRoundTripsRealBytesThroughFilesystemStorage(@TempDir Path tempDir) {
+        FileSystemAttachmentStorage realStorage = new FileSystemAttachmentStorage(new StorageProperties(tempDir.toString()));
+        AttachmentService realService = new AttachmentService(repository, realStorage, documentService, vaultAccessService);
+        byte[] bytes = "round-trip content, exact bytes expected back".getBytes();
+        String hash = sha256Hex(bytes);
+        when(repository.findById(documentId)).thenReturn(Optional.empty());
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        realService.upload(userId, documentId, hash, bytes, Instant.now());
+
+        ArgumentCaptor<AttachmentEntity> captor = ArgumentCaptor.forClass(AttachmentEntity.class);
+        verify(repository).save(captor.capture());
+        when(repository.findById(documentId)).thenReturn(Optional.of(captor.getValue()));
+
+        byte[] downloaded = realService.download(userId, documentId);
+
+        assertThat(downloaded).isEqualTo(bytes);
     }
 
     private static String sha256Hex(byte[] bytes) {

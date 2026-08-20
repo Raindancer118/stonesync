@@ -1,9 +1,11 @@
-import { Plugin, TFile, type TAbstractFile } from "obsidian";
+import { Notice, Plugin, TFile, type TAbstractFile } from "obsidian";
 import { DEFAULT_SETTINGS, type StoneSyncSettings } from "./settings/StoneSyncSettings";
 import { StoneSyncSettingTab } from "./settings/StoneSyncSettingTab";
 import { SyncManager } from "./sync/SyncManager";
 import { AttachmentSync } from "./attachments/AttachmentSync";
+import { VaultDownloadService } from "./sync/VaultDownloadService";
 import { createSyncExtension } from "./editor/syncExtension";
+import { parseConnectParams } from "./onboarding/DeepLinkHandler";
 
 const CURSOR_COLORS = [
 	"#e57373",
@@ -42,11 +44,27 @@ export default class StoneSyncPlugin extends Plugin {
 
 		this.addSettingTab(new StoneSyncSettingTab(this.app, this));
 
+		// Entry point for the collaborator-invite flow (see AuthentikLoginSuccessHandler /
+		// DeepLinkBuilder on the server): after a colleague logs in via Authentik, the browser
+		// opens obsidian://stonesync-connect?serverUrl=...&apiKey=...&vaultId=...&displayName=...,
+		// which Obsidian routes here without any manual settings entry needed.
+		this.registerObsidianProtocolHandler("stonesync-connect", (params) => {
+			void this.handleConnectDeepLink(params as unknown as Record<string, string>);
+		});
+
 		this.addCommand({
 			id: "stonesync-sync-now",
 			name: "Sync now",
 			callback: () => {
 				void this.syncManager?.syncNow();
+			},
+		});
+
+		this.addCommand({
+			id: "stonesync-download-vault",
+			name: "Download entire vault from server",
+			callback: () => {
+				void this.downloadEntireVault();
 			},
 		});
 
@@ -87,6 +105,46 @@ export default class StoneSyncPlugin extends Plugin {
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 		this.syncManager?.reconfigure();
+	}
+
+	/**
+	 * Applies the settings carried by a `stonesync-connect` deep link, then re-triggers sync
+	 * binding for whatever file is currently active so live sync starts immediately for it, and
+	 * kicks off a full bulk vault download - this is what actually satisfies "colleague clicks
+	 * the invite link and their plugin auto-configures and downloads the whole vault", with no
+	 * further manual step (see `VaultDownloadService`).
+	 */
+	private async handleConnectDeepLink(params: Record<string, string>): Promise<void> {
+		const parsed = parseConnectParams(params);
+		if (!parsed) {
+			new Notice("StoneSync: Received an incomplete connect link - please request a new invite.");
+			return;
+		}
+
+		this.settings.serverUrl = parsed.serverUrl;
+		this.settings.apiKey = parsed.apiKey;
+		this.settings.vaultId = parsed.vaultId;
+		this.settings.displayName = parsed.displayName;
+		await this.saveSettings();
+
+		new Notice(`StoneSync: Connected as ${parsed.displayName}. Sync is now active.`);
+		await this.syncManager?.onActiveLeafChange();
+		await this.downloadEntireVault();
+	}
+
+	/** Manual trigger for the "StoneSync: Download entire vault from server" command. */
+	async downloadEntireVault(): Promise<void> {
+		if (!this.settings.serverUrl || !this.settings.apiKey || !this.settings.vaultId) {
+			new Notice("StoneSync: Please set server URL, API key and vault ID in settings first.");
+			return;
+		}
+		const service = new VaultDownloadService({
+			app: this.app,
+			settings: this.settings,
+			userName: this.settings.displayName,
+			userColor: pickUserColor(this.settings.displayName),
+		});
+		await service.downloadEntireVault();
 	}
 
 	/** Synchronizes a single attachment (e.g. callable from a context menu entry). */

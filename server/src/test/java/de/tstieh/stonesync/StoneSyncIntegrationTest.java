@@ -16,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -27,6 +28,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -125,5 +128,57 @@ class StoneSyncIntegrationTest {
         assertThat(yjsSnapshotRepository.findById(document.getId())).isPresent();
         assertThat(yjsSnapshotRepository.findById(document.getId()).get().getStateBytes())
                 .containsExactly(9, 9, 9, 9);
+    }
+
+    /**
+     * Real HTTP round-trip (bulk vault download building blocks, Phase 2): a document is
+     * listed via {@code GET /api/documents?vaultId=...} and, for an uploaded attachment, the
+     * exact stored bytes are retrieved via {@code GET /api/attachments/{id}/download} - both
+     * behind the real Bearer/API-key auth filter chain, not a mocked one.
+     */
+    @Test
+    void listDocumentsAndDownloadAttachmentRoundTripThroughRealHttp() throws Exception {
+        Instant now = Instant.now();
+        UserEntity user = userRepository.save(new UserEntity(UUID.randomUUID(), "bulk-download@example.com", "hash", now));
+        String rawApiKey = adminService.createApiKey(user.getId(), "test-device");
+        VaultEntity vault = vaultRepository.save(new VaultEntity(UUID.randomUUID(), "bulk-download-vault", user.getId(), now));
+        adminService.grantAccess(user.getId(), vault.getId(), de.tstieh.stonesync.admin.VaultRole.OWNER);
+
+        DocumentEntity textDocument = documentRepository.save(new DocumentEntity(
+                UUID.randomUUID(), vault.getId(), "notes/a.md", DocumentEntity.ContentType.TEXT, now));
+        DocumentEntity attachmentDocument = documentRepository.save(new DocumentEntity(
+                UUID.randomUUID(), vault.getId(), "images/pic.png", DocumentEntity.ContentType.ATTACHMENT, now));
+
+        byte[] fileBytes = "real attachment bytes for the round trip".getBytes();
+        String hash = sha256Hex(fileBytes);
+        mockMvc.perform(multipart("/api/attachments/upload")
+                        .file(new MockMultipartFile("file", "pic.png", "application/octet-stream", fileBytes))
+                        .param("documentId", attachmentDocument.getId().toString())
+                        .param("hash", hash)
+                        .param("modifiedAt", now.toString())
+                        .header("Authorization", "Bearer " + rawApiKey))
+                .andExpect(status().isOk());
+
+        String listResponse = mockMvc.perform(get("/api/documents").param("vaultId", vault.getId().toString())
+                        .header("Authorization", "Bearer " + rawApiKey))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(listResponse).contains(textDocument.getId().toString(), "notes/a.md", "\"contentType\":\"TEXT\"");
+        assertThat(listResponse).contains(attachmentDocument.getId().toString(), "images/pic.png", "\"contentType\":\"ATTACHMENT\"");
+
+        mockMvc.perform(get("/api/attachments/{id}/download", attachmentDocument.getId())
+                        .header("Authorization", "Bearer " + rawApiKey))
+                .andExpect(status().isOk())
+                .andExpect(result -> assertThat(result.getResponse().getContentAsByteArray()).isEqualTo(fileBytes));
+    }
+
+    private static String sha256Hex(byte[] bytes) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            return java.util.HexFormat.of().formatHex(digest.digest(bytes));
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 }
