@@ -1,10 +1,12 @@
 package de.tstieh.stonesync.history;
 
+import de.tstieh.stonesync.admin.VaultAccessService;
 import de.tstieh.stonesync.sync.DocumentEntity;
 import de.tstieh.stonesync.sync.DocumentService;
 import de.tstieh.stonesync.sync.RestoreBroadcaster;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -15,7 +17,14 @@ import java.util.UUID;
  * (immediately for connected clients, queued otherwise - see {@link RestoreBroadcaster}); every
  * currently-existing, non-deleted document whose path is NOT present in the target commit gets
  * tombstoned, so the vault actually matches "the vault at that point in time" rather than only
- * ever adding content back.
+ * ever adding content back (this deliberately includes documents created AFTER the target commit
+ * - a git-like point-in-time restore, exactly as requested, not a selective rollback).
+ *
+ * <p>Every method here requires the caller's {@code userId} and enforces vault-level
+ * authorization via {@link VaultAccessService} - unlike most of {@code /api/admin/**}, which only
+ * requires any valid API key (see {@code InviteAdminController}), a restore's destructive blast
+ * radius (tombstoning an entire vault's documents) means a leaked key must not be able to wipe a
+ * vault its holder has no access to. Found via agy architecture review.</p>
  */
 @Service
 public class RestoreService {
@@ -23,15 +32,24 @@ public class RestoreService {
     private final VaultGitRepository gitRepository;
     private final DocumentService documentService;
     private final RestoreBroadcaster broadcaster;
+    private final VaultAccessService vaultAccessService;
 
     public RestoreService(VaultGitRepository gitRepository, DocumentService documentService,
-                           RestoreBroadcaster broadcaster) {
+                           RestoreBroadcaster broadcaster, VaultAccessService vaultAccessService) {
         this.gitRepository = gitRepository;
         this.documentService = documentService;
         this.broadcaster = broadcaster;
+        this.vaultAccessService = vaultAccessService;
     }
 
-    public RestoreResult restore(UUID vaultId, String commitIsh) {
+    public List<GitLogEntry> log(UUID userId, UUID vaultId) {
+        vaultAccessService.requireAccess(userId, vaultId);
+        return gitRepository.log(vaultId);
+    }
+
+    public RestoreResult restore(UUID userId, UUID vaultId, String commitIsh) {
+        vaultAccessService.requireAccess(userId, vaultId);
+
         Map<String, String> targetFiles = gitRepository.readTreeAtCommit(vaultId, commitIsh);
         Set<String> targetPaths = targetFiles.keySet();
 

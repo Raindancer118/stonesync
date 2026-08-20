@@ -11,6 +11,12 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -118,5 +124,66 @@ class VaultGitRepositoryTest {
 
         assertThat(log).hasSize(2);
         assertThat(log.get(0).message()).contains("by tom@example.com");
+    }
+
+    @Test
+    @DisplayName("removing a tracked file commits and it disappears from the tree at HEAD")
+    void removeAndCommitIfPresentRemovesTrackedFile() {
+        repository.writeAndCommitIfChanged(vaultId, "a.md", "content", "tom@example.com", now);
+
+        boolean committed = repository.removeAndCommitIfPresent(vaultId, "a.md", now.plusSeconds(1));
+
+        assertThat(committed).isTrue();
+        assertThat(repository.readTreeAtCommit(vaultId, "HEAD")).doesNotContainKey("a.md");
+        assertThat(repository.log(vaultId)).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("removing a file that was never materialized is a no-op, no commit created")
+    void removeAndCommitIfPresentIsNoOpForUntrackedFile() {
+        boolean committed = repository.removeAndCommitIfPresent(vaultId, "never-existed.md", now);
+
+        assertThat(committed).isFalse();
+        assertThat(repository.log(vaultId)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a document deleted after a restore-relevant history no longer resurfaces after removal, even at a later restore read")
+    void removedFileDoesNotReappearAtLaterCommit() {
+        repository.writeAndCommitIfChanged(vaultId, "a.md", "content", "tom@example.com", now);
+        repository.removeAndCommitIfPresent(vaultId, "a.md", now.plusSeconds(1));
+        repository.writeAndCommitIfChanged(vaultId, "b.md", "other content", "tom@example.com", now.plusSeconds(2));
+
+        assertThat(repository.readTreeAtCommit(vaultId, "HEAD")).doesNotContainKey("a.md");
+    }
+
+    @Test
+    @DisplayName("concurrent materialize calls for different files of the SAME vault do not throw, and both commits land")
+    void concurrentWritesToTheSameVaultDoNotThrowOrLoseCommits() throws Exception {
+        int fileCount = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(fileCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        try {
+            List<Future<Boolean>> futures = IntStream.range(0, fileCount)
+                    .mapToObj(i -> pool.submit(() -> {
+                        startLatch.await();
+                        return repository.writeAndCommitIfChanged(vaultId, "file" + i + ".md",
+                                "content " + i, "tom@example.com", now);
+                    }))
+                    .toList();
+            startLatch.countDown();
+
+            for (Future<Boolean> future : futures) {
+                assertThat(future.get(10, TimeUnit.SECONDS)).isTrue();
+            }
+        } finally {
+            pool.shutdown();
+        }
+
+        assertThat(repository.log(vaultId)).hasSize(fileCount);
+        Map<String, String> atHead = repository.readTreeAtCommit(vaultId, "HEAD");
+        for (int i = 0; i < fileCount; i++) {
+            assertThat(atHead).containsEntry("file" + i + ".md", "content " + i);
+        }
     }
 }

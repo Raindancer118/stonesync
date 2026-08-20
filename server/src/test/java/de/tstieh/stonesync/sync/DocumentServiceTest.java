@@ -36,6 +36,9 @@ class DocumentServiceTest {
     @Mock
     private DocumentDeletionBroadcaster deletionBroadcaster;
 
+    @Mock
+    private DocumentGitEraser gitEraser;
+
     private DocumentService service;
     private final UUID documentId = UUID.randomUUID();
     private final UUID vaultId = UUID.randomUUID();
@@ -44,7 +47,7 @@ class DocumentServiceTest {
     @BeforeEach
     void setUp() {
         Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
-        service = new DocumentService(repository, vaultAccessService, deletionBroadcaster, clock);
+        service = new DocumentService(repository, vaultAccessService, deletionBroadcaster, gitEraser, clock);
     }
 
     @Test
@@ -120,6 +123,30 @@ class DocumentServiceTest {
         service.markDeleted(userId, documentId);
 
         verify(deletionBroadcaster).broadcastDeleteNotice(documentId);
+    }
+
+    @Test
+    @DisplayName("a real user-initiated delete also erases the document from git history, so a later restore can't resurrect it")
+    void deleteErasesFromGitHistory() {
+        DocumentEntity doc = new DocumentEntity(documentId, vaultId, "path.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
+        when(repository.findById(documentId)).thenReturn(Optional.of(doc));
+
+        service.markDeleted(userId, documentId);
+
+        verify(gitEraser).removeFromGit(vaultId, "path.md");
+    }
+
+    @Test
+    @DisplayName("markDeletedForRestore does NOT erase from git history - it mirrors an older state, not a new deletion")
+    void markDeletedForRestoreDoesNotEraseFromGit() {
+        DocumentEntity doc = new DocumentEntity(documentId, vaultId, "path.md",
+                DocumentEntity.ContentType.TEXT, Instant.parse("2025-12-01T00:00:00Z"));
+        when(repository.findById(documentId)).thenReturn(Optional.of(doc));
+
+        service.markDeletedForRestore(documentId);
+
+        verify(gitEraser, never()).removeFromGit(any(), any());
     }
 
     @Test

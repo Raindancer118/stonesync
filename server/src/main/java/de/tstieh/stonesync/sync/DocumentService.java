@@ -23,13 +23,15 @@ public class DocumentService {
     private final DocumentRepository repository;
     private final VaultAccessService vaultAccessService;
     private final DocumentDeletionBroadcaster deletionBroadcaster;
+    private final DocumentGitEraser gitEraser;
     private final Clock clock;
 
     public DocumentService(DocumentRepository repository, VaultAccessService vaultAccessService,
-                            DocumentDeletionBroadcaster deletionBroadcaster, Clock clock) {
+                            DocumentDeletionBroadcaster deletionBroadcaster, DocumentGitEraser gitEraser, Clock clock) {
         this.repository = repository;
         this.vaultAccessService = vaultAccessService;
         this.deletionBroadcaster = deletionBroadcaster;
+        this.gitEraser = gitEraser;
         this.clock = clock;
     }
 
@@ -50,6 +52,9 @@ public class DocumentService {
         document.markDeleted(clock.instant());
         repository.save(document);
         deletionBroadcaster.broadcastDeleteNotice(documentId);
+        // A real, user-initiated delete - unlike markDeletedForRestore, this must also erase the
+        // document from git history, or a later restore would resurrect it (see DocumentGitEraser).
+        gitEraser.removeFromGit(document.getVaultId(), document.getCurrentPath());
     }
 
     /**
@@ -100,11 +105,10 @@ public class DocumentService {
     }
 
     /**
-     * Every non-deleted (id, path) pair of a vault, without a per-user access check - used by
-     * {@code RestoreService}, which runs as an already-authenticated console/admin operation
-     * rather than on behalf of a specific end user (same convention as the rest of the
-     * {@code /api/admin/**} surface, which likewise doesn't scope by user - see
-     * {@code InviteAdminController}).
+     * Every non-deleted (id, path) pair of a vault, without a per-user access check - used
+     * internally by {@code RestoreService}, which already enforces vault-level access itself
+     * once at the top of its own {@code restore}/{@code log} methods before calling any of these
+     * *ForRestore methods; repeating the same check per-call here would be redundant.
      */
     public List<DocumentSummary> listNonDeletedForRestore(UUID vaultId) {
         return repository.findByVaultId(vaultId).stream()

@@ -83,10 +83,13 @@ export class DocumentSession {
 		}
 		this.materializeTimer = setTimeout(() => {
 			this.materializeTimer = null;
-			materializeDocument(this.options.serverUrl, this.options.apiKey, this.options.documentId,
-				this.ytext.toString()
-			).catch((error) => console.error("[StoneSync] Failed to materialize document", this.options.documentId, error));
+			this.flushMaterialize();
 		}, MATERIALIZE_DEBOUNCE_MS);
+	}
+
+	private flushMaterialize(): void {
+		materializeDocument(this.options.serverUrl, this.options.apiKey, this.options.documentId, this.ytext.toString())
+			.catch((error) => console.error("[StoneSync] Failed to materialize document", this.options.documentId, error));
 	}
 
 	/**
@@ -127,10 +130,18 @@ export class DocumentSession {
 		});
 	}
 
+	/**
+	 * Tearing a session down (e.g. switching away from this file within the 3s materialize
+	 * debounce window) must not silently drop the last edit from git history - so any pending
+	 * debounce is flushed immediately instead of just cancelled (found via agy architecture
+	 * review: the Yjs WebSocket already persisted the edit by the time this runs, but the
+	 * separate git side-channel would otherwise lag behind by up to 3s forever).
+	 */
 	destroy(): void {
 		if (this.materializeTimer) {
 			clearTimeout(this.materializeTimer);
 			this.materializeTimer = null;
+			this.flushMaterialize();
 		}
 		this.socket.destroy();
 		this.awareness.destroy();

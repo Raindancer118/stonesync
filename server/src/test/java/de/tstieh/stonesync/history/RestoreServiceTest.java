@@ -1,5 +1,7 @@
 package de.tstieh.stonesync.history;
 
+import de.tstieh.stonesync.admin.VaultAccessDeniedException;
+import de.tstieh.stonesync.admin.VaultAccessService;
 import de.tstieh.stonesync.sync.DocumentEntity;
 import de.tstieh.stonesync.sync.DocumentService;
 import de.tstieh.stonesync.sync.RestoreBroadcaster;
@@ -15,7 +17,9 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -32,12 +36,38 @@ class RestoreServiceTest {
     @Mock
     private RestoreBroadcaster broadcaster;
 
+    @Mock
+    private VaultAccessService vaultAccessService;
+
     private RestoreService service;
+    private final UUID userId = UUID.randomUUID();
     private final UUID vaultId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
-        service = new RestoreService(gitRepository, documentService, broadcaster);
+        service = new RestoreService(gitRepository, documentService, broadcaster, vaultAccessService);
+    }
+
+    @Test
+    @DisplayName("restoring without vault access fails before the git tree is ever read (IDOR/leaked-key protection)")
+    void restoreWithoutVaultAccessIsDenied() {
+        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+
+        assertThatThrownBy(() -> service.restore(userId, vaultId, "abc123"))
+                .isInstanceOf(VaultAccessDeniedException.class);
+
+        verify(gitRepository, never()).readTreeAtCommit(any(), any());
+    }
+
+    @Test
+    @DisplayName("reading the git log without vault access fails before the repository is ever queried")
+    void logWithoutVaultAccessIsDenied() {
+        doThrow(new VaultAccessDeniedException("denied")).when(vaultAccessService).requireAccess(userId, vaultId);
+
+        assertThatThrownBy(() -> service.log(userId, vaultId))
+                .isInstanceOf(VaultAccessDeniedException.class);
+
+        verify(gitRepository, never()).log(any());
     }
 
     @Test
@@ -52,7 +82,7 @@ class RestoreServiceTest {
         when(documentService.resolveOrCreateForRestore(vaultId, "b.md", DocumentEntity.ContentType.TEXT)).thenReturn(docBId);
         when(documentService.listNonDeletedForRestore(vaultId)).thenReturn(List.of());
 
-        RestoreService.RestoreResult result = service.restore(vaultId, "abc123");
+        RestoreService.RestoreResult result = service.restore(userId, vaultId, "abc123");
 
         verify(broadcaster).broadcastOrQueueRestore(docAId, "content a");
         verify(broadcaster).broadcastOrQueueRestore(docBId, "content b");
@@ -69,7 +99,7 @@ class RestoreServiceTest {
         when(documentService.listNonDeletedForRestore(vaultId)).thenReturn(List.of(
                 new DocumentService.DocumentSummary(staleDocId, "deleted-in-target.md", DocumentEntity.ContentType.TEXT)));
 
-        RestoreService.RestoreResult result = service.restore(vaultId, "abc123");
+        RestoreService.RestoreResult result = service.restore(userId, vaultId, "abc123");
 
         verify(documentService).markDeletedForRestore(staleDocId);
         assertThat(result.tombstonedDocumentCount()).isEqualTo(1);
@@ -84,7 +114,7 @@ class RestoreServiceTest {
         when(documentService.listNonDeletedForRestore(vaultId)).thenReturn(List.of(
                 new DocumentService.DocumentSummary(docId, "a.md", DocumentEntity.ContentType.TEXT)));
 
-        service.restore(vaultId, "abc123");
+        service.restore(userId, vaultId, "abc123");
 
         verify(documentService, never()).markDeletedForRestore(any());
     }
