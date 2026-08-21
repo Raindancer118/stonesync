@@ -10,9 +10,11 @@ import de.tstieh.stonesync.history.VaultGitRepository;
 import de.tstieh.stonesync.links.DocumentLinkRepository;
 import de.tstieh.stonesync.links.LinkRewriteRepository;
 import de.tstieh.stonesync.logging.AppLog;
+import de.tstieh.stonesync.sync.DocumentDeletionBroadcaster;
 import de.tstieh.stonesync.sync.DocumentEntity;
 import de.tstieh.stonesync.sync.DocumentRepository;
 import de.tstieh.stonesync.sync.DocumentRestoreQueueRepository;
+import de.tstieh.stonesync.sync.VaultEventBroadcaster;
 import de.tstieh.stonesync.sync.YjsSnapshotRepository;
 import de.tstieh.stonesync.sync.YjsUpdateRepository;
 import org.springframework.stereotype.Service;
@@ -50,6 +52,8 @@ public class AdminService {
     private final DocumentLinkRepository documentLinkRepository;
     private final LinkRewriteRepository linkRewriteRepository;
     private final VaultGitRepository gitRepository;
+    private final DocumentDeletionBroadcaster documentDeletionBroadcaster;
+    private final VaultEventBroadcaster vaultEventBroadcaster;
 
     public AdminService(UserRepository userRepository, VaultRepository vaultRepository,
                          UserVaultAccessRepository accessRepository, ApiKeyRepository apiKeyRepository,
@@ -58,7 +62,8 @@ public class AdminService {
                          YjsSnapshotRepository yjsSnapshotRepository, AttachmentRepository attachmentRepository,
                          DocumentRestoreQueueRepository restoreQueueRepository,
                          DocumentLinkRepository documentLinkRepository, LinkRewriteRepository linkRewriteRepository,
-                         VaultGitRepository gitRepository) {
+                         VaultGitRepository gitRepository, DocumentDeletionBroadcaster documentDeletionBroadcaster,
+                         VaultEventBroadcaster vaultEventBroadcaster) {
         this.userRepository = userRepository;
         this.vaultRepository = vaultRepository;
         this.accessRepository = accessRepository;
@@ -74,6 +79,8 @@ public class AdminService {
         this.documentLinkRepository = documentLinkRepository;
         this.linkRewriteRepository = linkRewriteRepository;
         this.gitRepository = gitRepository;
+        this.documentDeletionBroadcaster = documentDeletionBroadcaster;
+        this.vaultEventBroadcaster = vaultEventBroadcaster;
     }
 
     @Transactional
@@ -228,6 +235,17 @@ public class AdminService {
 
         if (!documents.isEmpty()) {
             List<UUID> documentIds = documents.stream().map(DocumentEntity::getId).toList();
+
+            // Kick every connected client BEFORE touching a single row: a still-connected client
+            // sending a real edit for one of these documents mid-delete can otherwise insert a
+            // fresh yjs_updates row after that document's own rows were already wiped, failing
+            // the final documents-table delete's foreign key check. Explicit product decision:
+            // we don't wait for or care about whatever was in flight - notify, disconnect, then
+            // delete. `notifyVaultDeleted` tells every vault-events session "vault_deleted" before
+            // closing it, which is the "whoops, your vault is gone" the client surfaces.
+            documentIds.forEach(documentDeletionBroadcaster::kickSessions);
+            vaultEventBroadcaster.notifyVaultDeleted(vaultId);
+
             linkRewriteRepository.deleteByDocumentIdIn(documentIds);
             documentLinkRepository.deleteBySourceDocumentIdIn(documentIds);
             restoreQueueRepository.deleteAllByIdInBatch(documentIds);

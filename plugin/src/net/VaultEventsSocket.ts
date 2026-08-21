@@ -44,7 +44,23 @@ export interface VaultEventLinkRewrite {
 	originSessionId: string | null;
 }
 
-export type VaultEvent = VaultEventCreated | VaultEventDeleted | VaultEventAccessRevoked | VaultEventLinkRewrite;
+/**
+ * The whole vault was force-deleted server-side (see `AdminService#deleteVault(UUID, boolean)`'s
+ * force path) - sent right before the server closes this very connection. Unlike every other
+ * event here, there is no per-document/per-path detail: the vault itself is gone.
+ */
+export interface VaultEventVaultDeleted {
+	type: "vault_deleted";
+	/** Always null - a vault deletion is never something this client caused itself. */
+	originSessionId: null;
+}
+
+export type VaultEvent =
+	| VaultEventCreated
+	| VaultEventDeleted
+	| VaultEventAccessRevoked
+	| VaultEventLinkRewrite
+	| VaultEventVaultDeleted;
 
 export interface VaultEventsSocketOptions {
 	/** e.g. "wss://stonesync.example.com" (no trailing slash). */

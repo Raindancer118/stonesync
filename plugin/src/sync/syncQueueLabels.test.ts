@@ -54,4 +54,10 @@ describe("labelForEvent", () => {
 		expect(labelForEvent(event)).toContain("link rewrite");
 		expect(labelForEvent(event)).toContain("Notes/with-link.md");
 	});
+
+	it("describes a vault_deleted event as sync stopping", () => {
+		const event: VaultEvent = { type: "vault_deleted", originSessionId: null };
+
+		expect(labelForEvent(event)).toContain("Stopping sync");
+	});
 });

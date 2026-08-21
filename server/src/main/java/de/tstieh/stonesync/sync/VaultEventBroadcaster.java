@@ -33,4 +33,12 @@ public interface VaultEventBroadcaster {
      * vault-wide broadcast: everyone else's access is unchanged and must not be disturbed.
      */
     void notifyAccessRevoked(UUID vaultId, UUID userId, UUID documentId, String path);
+
+    /**
+     * Tells every currently connected session for a vault that it was just force-deleted, then
+     * closes each of those sessions - see {@code AdminService#deleteVault(UUID, boolean)}'s
+     * force path. Unlike the document/vault events above, this is not filtered by per-path
+     * access: the vault itself no longer exists for anyone.
+     */
+    void notifyVaultDeleted(UUID vaultId);
 }

@@ -240,6 +240,17 @@ export class VaultEventsManager {
 			new Notice(
 				`StoneSync: You no longer have access to "${event.path}" - the local copy was moved to Obsidian's trash.`
 			);
+		} else if (event.type === "vault_deleted") {
+			// The server already closed this connection right after sending this - stop() here
+			// just prevents the socket from trying to reconnect and spamming reconnect/auth
+			// errors against a vault that no longer exists. Local files are left untouched: this
+			// is purely "the server-side vault is gone", not itself a signal to delete anything
+			// on this device.
+			new Notice(
+				"StoneSync: Whoops - this vault was deleted on the server. Sync has been stopped; " +
+					"your local files are untouched."
+			);
+			this.stop();
 		}
 	}
 

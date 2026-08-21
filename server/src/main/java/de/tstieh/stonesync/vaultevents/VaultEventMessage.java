@@ -32,4 +32,11 @@ public record VaultEventMessage(String type, String documentId, String path, Str
      * (which is the only party that understands Yjs) performs it.
      */
     public static final String TYPE_LINK_REWRITE = "link_rewrite";
+    /**
+     * The whole vault was force-deleted (see {@code AdminService#deleteVault(UUID, boolean)}),
+     * sent to every currently connected session for that vault right before they are kicked -
+     * unlike every other message type here, deliberately not filtered by per-path read access
+     * ({@code VaultEventsHandler#maySee}), since the vault itself is gone for everyone alike.
+     */
+    public static final String TYPE_VAULT_DELETED = "vault_deleted";
 }

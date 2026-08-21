@@ -91,6 +91,39 @@ public class VaultEventsHandler extends TextWebSocketHandler
     }
 
     @Override
+    public void notifyVaultDeleted(UUID vaultId) {
+        VaultEventMessage message = new VaultEventMessage(VaultEventMessage.TYPE_VAULT_DELETED, null, null, null, null);
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(message);
+        } catch (JsonProcessingException e) {
+            AppLog.error("Failed to serialize vault-deleted event for vault {}: {}", vaultId, e.getMessage());
+            json = null;
+        }
+
+        int kicked = 0;
+        for (WebSocketSession session : registry.sessionsFor(vaultId)) {
+            if (!session.isOpen()) {
+                continue;
+            }
+            if (json != null) {
+                try {
+                    session.sendMessage(new TextMessage(json));
+                } catch (IOException e) {
+                    AppLog.warn("Failed to send vault-deleted event to session {}: {}", session.getId(), e.getMessage());
+                }
+            }
+            try {
+                session.close(CloseStatus.NORMAL);
+            } catch (IOException e) {
+                AppLog.warn("Failed to close vault-events session {} for vault {}: {}", session.getId(), vaultId, e.getMessage());
+            }
+            kicked++;
+        }
+        AppLog.info("Notified and kicked {} vault-events session(s) for deleted vault {}", kicked, vaultId);
+    }
+
+    @Override
     public void notifyLinkRewrite(UUID vaultId, UUID documentId, String path, long rewriteId, String oldLink,
                                    String newLink) {
         broadcast(vaultId, new VaultEventMessage(VaultEventMessage.TYPE_LINK_REWRITE, documentId.toString(), path,

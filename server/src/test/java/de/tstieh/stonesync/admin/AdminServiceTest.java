@@ -7,9 +7,11 @@ import de.tstieh.stonesync.auth.ApiKeyRepository;
 import de.tstieh.stonesync.history.VaultGitRepository;
 import de.tstieh.stonesync.links.DocumentLinkRepository;
 import de.tstieh.stonesync.links.LinkRewriteRepository;
+import de.tstieh.stonesync.sync.DocumentDeletionBroadcaster;
 import de.tstieh.stonesync.sync.DocumentEntity;
 import de.tstieh.stonesync.sync.DocumentRepository;
 import de.tstieh.stonesync.sync.DocumentRestoreQueueRepository;
+import de.tstieh.stonesync.sync.VaultEventBroadcaster;
 import de.tstieh.stonesync.sync.YjsSnapshotRepository;
 import de.tstieh.stonesync.sync.YjsUpdateRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,6 +63,10 @@ class AdminServiceTest {
     private LinkRewriteRepository linkRewriteRepository;
     @Mock
     private VaultGitRepository gitRepository;
+    @Mock
+    private DocumentDeletionBroadcaster documentDeletionBroadcaster;
+    @Mock
+    private VaultEventBroadcaster vaultEventBroadcaster;
 
     private final ApiKeyHasher hasher = new ApiKeyHasher();
     @org.mockito.Mock
@@ -75,7 +81,7 @@ class AdminServiceTest {
         service = new AdminService(userRepository, vaultRepository, accessRepository, apiKeyRepository,
                 documentRepository, hasher, auditService, clock, yjsUpdateRepository, yjsSnapshotRepository,
                 attachmentRepository, restoreQueueRepository, documentLinkRepository, linkRewriteRepository,
-                gitRepository);
+                gitRepository, documentDeletionBroadcaster, vaultEventBroadcaster);
     }
 
     @Test
@@ -135,6 +141,8 @@ class AdminServiceTest {
 
         service.deleteVault(vaultId, true);
 
+        verify(documentDeletionBroadcaster).kickSessions(document.getId());
+        verify(vaultEventBroadcaster).notifyVaultDeleted(vaultId);
         verify(linkRewriteRepository).deleteByDocumentIdIn(documentIds);
         verify(documentLinkRepository).deleteBySourceDocumentIdIn(documentIds);
         verify(restoreQueueRepository).deleteAllByIdInBatch(documentIds);

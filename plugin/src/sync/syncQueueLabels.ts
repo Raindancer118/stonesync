@@ -12,5 +12,7 @@ export function labelForEvent(event: VaultEvent): string {
 			return `Revoking local access to "${event.path}"`;
 		case "link_rewrite":
 			return `Applying a link rewrite in "${event.path}"`;
+		case "vault_deleted":
+			return "Stopping sync (vault was deleted on the server)";
 	}
 }

@@ -209,6 +209,24 @@ public class DocumentSyncHandler extends AbstractWebSocketHandler
         AppLog.debug("Broadcast DELETE_NOTICE for document {} to {} connected session(s)", documentId, notified);
     }
 
+    @Override
+    public void kickSessions(UUID documentId) {
+        int kicked = 0;
+        for (WebSocketSession peer : registry.sessionsFor(documentId)) {
+            if (!peer.isOpen()) {
+                continue;
+            }
+            sendSafely(peer, new byte[]{SyncMessageType.DELETE_NOTICE});
+            try {
+                peer.close(CloseStatus.NORMAL);
+            } catch (IOException e) {
+                AppLog.warn("Failed to close sync session {} for document {}: {}", peer.getId(), documentId, e.getMessage());
+            }
+            kicked++;
+        }
+        AppLog.info("Kicked {} connected session(s) for document {} ahead of a hard delete", kicked, documentId);
+    }
+
     /**
      * Called by {@link de.tstieh.stonesync.history.RestoreService} for every file present in a
      * restore target commit. Delivered live to every currently-connected session for that
