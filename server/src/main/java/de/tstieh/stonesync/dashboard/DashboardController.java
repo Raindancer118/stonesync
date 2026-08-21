@@ -107,15 +107,11 @@ public class DashboardController {
     private void writeNoAccountPage(HttpServletResponse response, String email) throws IOException {
         response.setStatus(HttpServletResponse.SC_FORBIDDEN);
         response.setContentType("text/html;charset=UTF-8");
-        response.getWriter().write("""
-                <!doctype html>
-                <html><head><meta charset="utf-8"><title>StoneSync - No account</title></head>
-                <body style="font-family: sans-serif; max-width: 40em; margin: 4em auto; text-align: center;">
+        response.getWriter().write(PageShell.centered("StoneSync - No account", """
                 <h1>No StoneSync account</h1>
-                <p>There is no StoneSync account for <strong>%s</strong> yet. Ask a vault owner for an
-                invite link (<code>/invite/&lt;token&gt;</code>) to get one.</p>
-                </body></html>
-                """.formatted(HtmlEscaper.escape(email)));
+                <p class="lede">There is no StoneSync account for <strong>%s</strong> yet. Ask a vault
+                owner for an invite link (<code>/invite/&lt;token&gt;</code>) to get one.</p>
+                """.formatted(HtmlEscaper.escape(email))));
     }
 
     private void writeDashboardPage(HttpServletResponse response, HttpServletRequest request, String email,
@@ -129,49 +125,48 @@ public class DashboardController {
                 .forEach(membership -> rows.append(
                         renderVaultRow(vaultsById.get(membership.getVaultId()), membership.getRole(), csrfToken)));
         if (rows.isEmpty()) {
-            rows.append("<p style=\"color:#666;\">You don't have access to any vaults yet.</p>");
+            rows.append("<p style=\"color:var(--text-muted);\">You don't have access to any vaults yet.</p>");
         }
 
         response.setStatus(HttpServletResponse.SC_OK);
         response.setContentType("text/html;charset=UTF-8");
-        response.getWriter().write("""
-                <!doctype html>
-                <html><head><meta charset="utf-8"><title>StoneSync - Your vaults</title></head>
-                <body style="font-family: sans-serif; max-width: 40em; margin: 3em auto; padding: 0 1em;">
-                <h1>Your vaults</h1>
-                <p style="color:#666;">Signed in as %s.</p>
-                %s
-                </body></html>
-                """.formatted(HtmlEscaper.escape(email), rows));
+        response.getWriter().write(PageShell.page("StoneSync - Your vaults", PageShell.rail(null), """
+                <section>
+                  <div class="label">Your vaults</div>
+                  <p style="color:var(--text-muted); margin-top:-0.5rem;">Signed in as %s.</p>
+                  %s
+                </section>
+                """.formatted(HtmlEscaper.escape(email), rows)));
     }
 
     private String renderVaultRow(VaultEntity vault, VaultRole role, CsrfToken csrfToken) {
         String inviteForm = role == VaultRole.OWNER ? renderInviteForm(vault.getId(), csrfToken) : "";
+        String roleClass = "role-" + role.name().toLowerCase();
         return """
-                <div style="border:1px solid #ddd; border-radius:6px; padding:1em; margin:1em 0;">
-                  <strong>%s</strong> <span style="color:#666;">(%s)</span>
-                  &mdash; <a href="/dashboard/vaults/%s">Browse &amp; search</a>
+                <div class="vault-row" style="flex-direction:column; align-items:stretch;">
+                  <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+                    <div>
+                      <div class="name">%s</div>
+                      <span class="role-badge %s">%s</span>
+                    </div>
+                    <a href="/dashboard/vaults/%s">Browse &amp; search &rarr;</a>
+                  </div>
                   %s
                 </div>
-                """.formatted(HtmlEscaper.escape(vault.getName()), role, vault.getId(), inviteForm);
+                """.formatted(HtmlEscaper.escape(vault.getName()), roleClass, role, vault.getId(), inviteForm);
     }
 
     private String renderInviteForm(UUID vaultId, CsrfToken csrfToken) {
         return """
-                <form method="post" action="/dashboard/vaults/%s/invites"
-                      style="margin-top:0.8em; display:flex; gap:0.5em; flex-wrap:wrap; align-items:center;">
+                <form method="post" action="/dashboard/vaults/%s/invites" class="invite-form" style="margin-top:1rem;">
                   <input type="hidden" name="%s" value="%s"/>
-                  <input type="email" name="inviteeEmail" placeholder="colleague@example.com" required
-                         style="flex:1; min-width:12em; padding:0.4em;"/>
-                  <select name="role" style="padding:0.4em;">
+                  <input type="email" name="inviteeEmail" placeholder="colleague@example.com" required/>
+                  <select name="role">
                     <option value="VIEWER">Viewer</option>
                     <option value="EDITOR">Editor</option>
                     <option value="OWNER">Owner</option>
                   </select>
-                  <button type="submit"
-                          style="padding:0.4em 0.9em; background:#5865f2; color:white; border:none; border-radius:4px; cursor:pointer;">
-                    Create invite
-                  </button>
+                  <button type="submit" class="btn">Create invite</button>
                 </form>
                 """.formatted(vaultId, HtmlEscaper.escape(csrfToken.getParameterName()),
                 HtmlEscaper.escape(csrfToken.getToken()));
@@ -181,15 +176,11 @@ public class DashboardController {
             throws IOException {
         response.setStatus(HttpServletResponse.SC_OK);
         response.setContentType("text/html;charset=UTF-8");
-        response.getWriter().write("""
-                <!doctype html>
-                <html><head><meta charset="utf-8"><title>StoneSync - Invite created</title></head>
-                <body style="font-family: sans-serif; max-width: 40em; margin: 4em auto; text-align: center;">
+        response.getWriter().write(PageShell.centered("StoneSync - Invite created", """
                 <h1>Invite created</h1>
-                <p>Send this link to <strong>%s</strong>:</p>
+                <p class="lede">Send this link to <strong>%s</strong>:</p>
                 <p><code style="word-break: break-all;">%s</code></p>
                 <p><a href="/dashboard">Back to your vaults</a></p>
-                </body></html>
-                """.formatted(HtmlEscaper.escape(inviteeEmail), HtmlEscaper.escape(inviteUrl)));
+                """.formatted(HtmlEscaper.escape(inviteeEmail), HtmlEscaper.escape(inviteUrl))));
     }
 }

@@ -1,6 +1,7 @@
 package de.tstieh.stonesync.invite;
 
 import de.tstieh.stonesync.admin.AdminService;
+import de.tstieh.stonesync.dashboard.PageShell;
 import de.tstieh.stonesync.logging.AppLog;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -93,29 +94,21 @@ public class AuthentikLoginController {
             throws IOException {
         response.setStatus(HttpServletResponse.SC_OK);
         response.setContentType("text/html;charset=UTF-8");
-        response.getWriter().write("""
-                <!doctype html>
-                <html><head><meta charset="utf-8"><title>StoneSync - You're in!</title></head>
-                <body style="font-family: sans-serif; max-width: 40em; margin: 4em auto; text-align: center;">
+        response.getWriter().write(PageShell.centered("StoneSync - You're in!", """
                 <h1>Welcome, %s!</h1>
-                <p>Click below to open Obsidian - StoneSync will configure itself and download the vault automatically.</p>
-                <p><a href="%s" style="display:inline-block; padding: 0.8em 1.5em; background:#5865f2; color:white; text-decoration:none; border-radius:6px; font-size:1.1em;">Open in Obsidian</a></p>
-                <p style="color:#666; font-size:0.9em;">This link works for the next 2 minutes. If it expires before you click it,
+                <p class="lede">Click below to open Obsidian - StoneSync will configure itself and download the vault automatically.</p>
+                <p><a href="%s" class="btn">Open in Obsidian</a></p>
+                <p class="lede" style="font-size:0.9em;">This link works for the next 2 minutes. If it expires before you click it,
                 just come back and click "Connect now" again.</p>
-                </body></html>
-                """.formatted(HtmlEscaper.escape(displayName), deepLink));
+                """.formatted(HtmlEscaper.escape(displayName), deepLink)));
     }
 
     private void writeConnectErrorPage(HttpServletResponse response, String message) throws IOException {
         response.setStatus(HttpServletResponse.SC_GONE);
         response.setContentType("text/html;charset=UTF-8");
-        response.getWriter().write("""
-                <!doctype html>
-                <html><head><meta charset="utf-8"><title>StoneSync - Invite problem</title></head>
-                <body style="font-family: sans-serif; max-width: 40em; margin: 4em auto; text-align: center;">
+        response.getWriter().write(PageShell.centered("StoneSync - Invite problem", """
                 <h1>Something went wrong</h1>
-                <p>%s</p>
-                </body></html>
-                """.formatted(HtmlEscaper.escape(message)));
+                <p class="lede">%s</p>
+                """.formatted(HtmlEscaper.escape(message))));
     }
 }

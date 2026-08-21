@@ -82,14 +82,15 @@ public class VaultViewerController {
                 .sorted((a, b) -> a.path().compareToIgnoreCase(b.path()))
                 .forEach(doc -> rows.append(renderBrowseRow(vaultId, doc)));
         if (rows.isEmpty()) {
-            rows.append("<p style=\"color:#666;\">This vault is empty.</p>");
+            rows.append("<p style=\"color:var(--text-muted);\">This vault is empty.</p>");
         }
 
-        writePage(response, vaultName + " - StoneSync", """
-                <h1>%s</h1>
-                <p><a href="/dashboard">&larr; Back to your vaults</a></p>
-                %s
-                %s
+        writePage(response, vaultName + " - StoneSync", vaultId, vaultName, """
+                <section>
+                  <div class="label">%s</div>
+                  %s
+                  <div class="panel" style="padding:.5rem 1rem;">%s</div>
+                </section>
                 """.formatted(HtmlEscaper.escape(vaultName), renderSearchForm(vaultId, ""), rows));
     }
 
@@ -106,17 +107,18 @@ public class VaultViewerController {
         StringBuilder results = new StringBuilder();
         hits.forEach(hit -> results.append(renderSearchHit(vaultId, hit)));
         if (q.isBlank()) {
-            results.append("<p style=\"color:#666;\">Type something to search.</p>");
+            results.append("<p style=\"color:var(--text-muted);\">Type something to search.</p>");
         } else if (hits.isEmpty()) {
-            results.append("<p style=\"color:#666;\">No matches for \"").append(HtmlEscaper.escape(q)).append("\".</p>");
+            results.append("<p style=\"color:var(--text-muted);\">No matches for \"").append(HtmlEscaper.escape(q)).append("\".</p>");
         }
 
-        writePage(response, "Search " + vaultName + " - StoneSync", """
-                <h1>%s</h1>
-                <p><a href="/dashboard/vaults/%s">&larr; Back to browse</a></p>
-                %s
-                %s
-                """.formatted(HtmlEscaper.escape(vaultName), vaultId, renderSearchForm(vaultId, q), results));
+        writePage(response, "Search " + vaultName + " - StoneSync", vaultId, vaultName, """
+                <section>
+                  <div class="label">Search %s</div>
+                  %s
+                  %s
+                </section>
+                """.formatted(HtmlEscaper.escape(vaultName), renderSearchForm(vaultId, q), results));
     }
 
     @GetMapping("/notes/{documentId}")
@@ -131,11 +133,13 @@ public class VaultViewerController {
                 .filter(doc -> doc.getVaultId().equals(vaultId))
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
 
-        writePage(response, document.getCurrentPath() + " - StoneSync", """
-                <p><a href="/dashboard/vaults/%s">&larr; Back to browse</a></p>
-                <h1>%s</h1>
-                <article>%s</article>
-                """.formatted(vaultId, HtmlEscaper.escape(document.getCurrentPath()),
+        String vaultName = vaultRepository.findById(vaultId).map(VaultEntity::getName).orElse("Vault");
+        writePage(response, document.getCurrentPath() + " - StoneSync", vaultId, vaultName, """
+                <section>
+                  <div class="label">%s</div>
+                  <article class="note">%s</article>
+                </section>
+                """.formatted(HtmlEscaper.escape(document.getCurrentPath()),
                 MarkdownRenderer.render(document.getPlainText())));
     }
 
@@ -169,11 +173,9 @@ public class VaultViewerController {
         String href = doc.contentType() == DocumentEntity.ContentType.TEXT
                 ? "/dashboard/vaults/" + vaultId + "/notes/" + doc.id()
                 : "/dashboard/vaults/" + vaultId + "/attachments/" + doc.id();
-        String icon = doc.contentType() == DocumentEntity.ContentType.TEXT ? "📄" : "📎";
+        String icon = doc.contentType() == DocumentEntity.ContentType.TEXT ? "◆" : "▣";
         return """
-                <div style="padding:0.5em 0; border-bottom:1px solid #eee;">
-                  %s <a href="%s">%s</a>
-                </div>
+                <div class="file-row"><span class="glyph">%s</span><a href="%s">%s</a></div>
                 """.formatted(icon, href, HtmlEscaper.escape(doc.path()));
     }
 
@@ -182,20 +184,18 @@ public class VaultViewerController {
                 ? "/dashboard/vaults/" + vaultId + "/notes/" + hit.id()
                 : "/dashboard/vaults/" + vaultId + "/attachments/" + hit.id();
         return """
-                <div style="padding:0.8em 0; border-bottom:1px solid #eee;">
-                  <a href="%s"><strong>%s</strong></a>
-                  <p style="color:#444; margin:0.3em 0 0;">%s</p>
+                <div class="hit">
+                  <a class="path" href="%s">%s</a>
+                  <p class="snippet">%s</p>
                 </div>
                 """.formatted(href, HtmlEscaper.escape(hit.path()), hit.snippetHtml());
     }
 
     private String renderSearchForm(UUID vaultId, String currentQuery) {
         return """
-                <form method="get" action="/dashboard/vaults/%s/search"
-                      style="margin:1em 0; display:flex; gap:0.5em;">
-                  <input type="text" name="q" value="%s" placeholder="Search this vault..." required
-                         style="flex:1; padding:0.5em;"/>
-                  <button type="submit" style="padding:0.5em 1em;">Search</button>
+                <form method="get" action="/dashboard/vaults/%s/search" class="search-box">
+                  <input type="text" name="q" value="%s" placeholder="Search this vault..." required/>
+                  <button type="submit" class="btn">Search</button>
                 </form>
                 """.formatted(vaultId, HtmlEscaper.escape(currentQuery));
     }
@@ -205,21 +205,24 @@ public class VaultViewerController {
         if (user.isEmpty()) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("text/html;charset=UTF-8");
-            response.getWriter().write("<h1>No StoneSync account</h1><p>Please use an invite link first.</p>");
+            response.getWriter().write(PageShell.centered("StoneSync - No account", """
+                    <h1>No StoneSync account</h1>
+                    <p class="lede">Please use an invite link first.</p>
+                    """));
         }
         return user;
     }
 
-    private void writePage(HttpServletResponse response, String title, String bodyHtml) throws IOException {
+    private void writePage(HttpServletResponse response, String title, UUID vaultId, String vaultName,
+                            String bodyHtml) throws IOException {
         response.setStatus(HttpServletResponse.SC_OK);
         response.setContentType("text/html;charset=UTF-8");
-        response.getWriter().write("""
-                <!doctype html>
-                <html><head><meta charset="utf-8"><title>%s</title></head>
-                <body style="font-family: sans-serif; max-width: 50em; margin: 3em auto; padding: 0 1em; line-height: 1.5;">
-                %s
-                </body></html>
-                """.formatted(HtmlEscaper.escape(title), bodyHtml));
+        String crumb = """
+                <div class="crumb">%s</div>
+                <a href="/dashboard/vaults/%s">Browse</a>
+                <a href="/dashboard/vaults/%s/search">Search</a>
+                """.formatted(HtmlEscaper.escape(vaultName), vaultId, vaultId);
+        response.getWriter().write(PageShell.page(title, PageShell.rail(crumb), bodyHtml));
     }
 
     private static String extensionOf(String path) {

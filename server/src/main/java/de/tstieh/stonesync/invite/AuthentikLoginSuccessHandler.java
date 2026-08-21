@@ -4,6 +4,7 @@ import de.tstieh.stonesync.admin.AdminService;
 import de.tstieh.stonesync.admin.UserEntity;
 import de.tstieh.stonesync.admin.UserRepository;
 import de.tstieh.stonesync.auth.ApiKeyHasher;
+import de.tstieh.stonesync.dashboard.PageShell;
 import de.tstieh.stonesync.logging.AppLog;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -112,12 +113,9 @@ public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandle
     private void writeGetReadyPage(HttpServletResponse response, String displayName) throws IOException {
         response.setStatus(HttpServletResponse.SC_OK);
         response.setContentType("text/html;charset=UTF-8");
-        response.getWriter().write("""
-                <!doctype html>
-                <html><head><meta charset="utf-8"><title>StoneSync - Almost there</title></head>
-                <body style="font-family: sans-serif; max-width: 40em; margin: 4em auto; padding: 0 1em;">
+        response.getWriter().write(PageShell.centered("StoneSync - Almost there", """
                 <h1>Welcome, %s!</h1>
-                <p>You now have access to the vault. Before you connect, make sure you have:</p>
+                <p class="lede">You now have access to the vault. Before you connect, make sure you have:</p>
                 <ol>
                   <li>
                     <strong>Obsidian</strong> - if you don't have it yet, download it from
@@ -135,26 +133,21 @@ public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandle
                     </ol>
                   </li>
                 </ol>
-                <p>Already have both? Click below - this is the step that actually connects you to the vault.</p>
-                <p><a href="/invite/connect" style="display:inline-block; padding: 0.8em 1.5em; background:#5865f2; color:white; text-decoration:none; border-radius:6px; font-size:1.1em;">Connect now</a></p>
-                <p style="color:#666; font-size:0.9em;">Not ready yet? No problem - leave this tab/browser open,
+                <p class="lede">Already have both? Click below - this is the step that actually connects you to the vault.</p>
+                <p><a href="/invite/connect" class="btn">Connect now</a></p>
+                <p class="lede" style="font-size:0.9em;">Not ready yet? No problem - leave this tab/browser open,
                 install everything, then click "Connect now" whenever you are. (If you close the browser and come
                 back much later and "Connect now" says your session expired, just ask whoever invited you for a
                 fresh invite link - this one has already been used to log you in.)</p>
-                </body></html>
-                """.formatted(HtmlEscaper.escape(displayName)));
+                """.formatted(HtmlEscaper.escape(displayName))));
     }
 
     private void writeErrorPage(HttpServletResponse response, String message) throws IOException {
         response.setStatus(HttpServletResponse.SC_GONE);
         response.setContentType("text/html;charset=UTF-8");
-        response.getWriter().write("""
-                <!doctype html>
-                <html><head><meta charset="utf-8"><title>StoneSync - Invite problem</title></head>
-                <body style="font-family: sans-serif; max-width: 40em; margin: 4em auto; text-align: center;">
+        response.getWriter().write(PageShell.centered("StoneSync - Invite problem", """
                 <h1>Something went wrong</h1>
-                <p>%s</p>
-                </body></html>
-                """.formatted(message));
+                <p class="lede">%s</p>
+                """.formatted(message)));
     }
 }
