@@ -19,7 +19,29 @@ if [ "$vault_id" = "" ]; then
 fi
 
 if [ "$force" = "true" ]; then
-	http_code=$(curl -s -o /tmp/ss-delete-vault.out -w "%{http_code}" -X DELETE "$ADMIN_BASE/vaults/$vault_id?force=true" -H "$ADMIN_AUTH")
+	# --force hard-deletes every document row (and everything referencing them) in one
+	# all-or-nothing transaction. A still-connected client sending a real edit for one of
+	# those documents right as that transaction runs can insert a fresh yjs_updates row after
+	# that document's own rows were already wiped, so the final documents-table delete then
+	# fails its foreign key check - the whole transaction rolls back cleanly on that, nothing
+	# is left half-deleted. Each retry is a brand new transaction that re-reads the vault's
+	# current document list from scratch, so it converges once that race window closes
+	# (typically within a couple of seconds, once the lingering client's last edit lands).
+	attempt=1
+	max_attempts=5
+	while [ "$attempt" -le "$max_attempts" ]; do
+		http_code=$(curl -s -o /tmp/ss-delete-vault.out -w "%{http_code}" -X DELETE "$ADMIN_BASE/vaults/$vault_id?force=true" -H "$ADMIN_AUTH")
+		if [ "$http_code" -lt 300 ]; then
+			break
+		fi
+		if [ "$http_code" = "500" ] && [ "$attempt" -lt "$max_attempts" ]; then
+			echo "Attempt $attempt/$max_attempts hit a concurrent write - retrying in 2s..." >&2
+			sleep 2
+			attempt=$((attempt + 1))
+			continue
+		fi
+		break
+	done
 else
 	# Server rejects this (409) if the vault still has documents - run ss-docs "$1"
 	# first to check, or re-run with --force. This is intentional: nothing here cascades
