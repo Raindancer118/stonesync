@@ -67,6 +67,12 @@ public class VaultViewerController {
         this.searchService = searchService;
     }
 
+    /**
+     * Deliberately search-only: per feedback, this must not expose a full raw file listing of
+     * the vault - the hero search is the only way in. {@code documentService.listDocuments} (and
+     * therefore per-path access filtering, same as everywhere else) still runs, just to decide
+     * whether to show "this vault is empty"; nothing about individual files is ever rendered here.
+     */
     @GetMapping
     public void browse(@AuthenticationPrincipal OidcUser oidcUser, @PathVariable UUID vaultId,
                         HttpServletResponse response) throws IOException {
@@ -75,23 +81,13 @@ public class VaultViewerController {
             return;
         }
         String vaultName = vaultRepository.findById(vaultId).map(VaultEntity::getName).orElse("Vault");
-        List<DocumentService.DocumentSummary> documents = documentService.listDocuments(user.get().getId(), vaultId);
-
-        StringBuilder rows = new StringBuilder();
-        documents.stream()
-                .sorted((a, b) -> a.path().compareToIgnoreCase(b.path()))
-                .forEach(doc -> rows.append(renderBrowseRow(vaultId, doc)));
-        if (rows.isEmpty()) {
-            rows.append("<p style=\"color:var(--text-muted);\">This vault is empty.</p>");
-        }
+        boolean empty = documentService.listDocuments(user.get().getId(), vaultId).isEmpty();
 
         writePage(response, vaultName + " - StoneSync", vaultId, vaultName, """
                 %s
-                <section>
-                  <div class="label">%s</div>
-                  <div class="panel" style="padding:.5rem 1rem;">%s</div>
-                </section>
-                """.formatted(renderHeroSearch(vaultId, ""), HtmlEscaper.escape(vaultName), rows));
+                %s
+                """.formatted(renderHeroSearch(vaultId, ""),
+                empty ? "<p style=\"text-align:center; color:var(--text-muted);\">This vault is empty.</p>" : ""));
     }
 
     @GetMapping("/search")
@@ -167,16 +163,6 @@ public class VaultViewerController {
                 disposition + "; filename=\"" + filename.replace("\"", "") + "\"");
         response.setContentLength(bytes.length);
         response.getOutputStream().write(bytes);
-    }
-
-    private String renderBrowseRow(UUID vaultId, DocumentService.DocumentSummary doc) {
-        String href = doc.contentType() == DocumentEntity.ContentType.TEXT
-                ? "/dashboard/vaults/" + vaultId + "/notes/" + doc.id()
-                : "/dashboard/vaults/" + vaultId + "/attachments/" + doc.id();
-        String icon = doc.contentType() == DocumentEntity.ContentType.TEXT ? "◆" : "▣";
-        return """
-                <div class="file-row"><span class="glyph">%s</span><a href="%s">%s</a></div>
-                """.formatted(icon, href, HtmlEscaper.escape(doc.path()));
     }
 
     private String renderSearchHit(UUID vaultId, DocumentSearchService.SearchHit hit) {

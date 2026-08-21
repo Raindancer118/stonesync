@@ -124,7 +124,7 @@ class VaultViewerControllerTest {
 
     @Test
     @DisplayName("browsing a vault lists its notes and attachments, linking to each")
-    void browseListsNotesAndAttachments() throws Exception {
+    void browseIsSearchOnlyAndNeverListsIndividualFiles() throws Exception {
         UserEntity owner = user("browse-owner-" + UUID.randomUUID() + "@example.com");
         VaultEntity vault = vault("browse-vault", owner.getId());
         adminService.grantAccess(owner.getId(), vault.getId(), VaultRole.OWNER);
@@ -135,10 +135,11 @@ class VaultViewerControllerTest {
                         .with(oidcLogin().userInfoToken(token -> token.claim("email", owner.getEmail()))))
                 .andExpect(status().isOk())
                 .andExpect(content().string(allOf(
-                        containsString("Notes/plan.md"),
-                        containsString("Assets/report.pdf"),
-                        containsString("/dashboard/vaults/" + vault.getId() + "/notes/" + noteDoc.getId()),
-                        containsString("/dashboard/vaults/" + vault.getId() + "/attachments/" + attachmentDoc.getId()))));
+                        containsString("Search notes, PDFs, screenshots"),
+                        not(containsString("Notes/plan.md")),
+                        not(containsString("Assets/report.pdf")),
+                        not(containsString("/dashboard/vaults/" + vault.getId() + "/notes/" + noteDoc.getId())),
+                        not(containsString("/dashboard/vaults/" + vault.getId() + "/attachments/" + attachmentDoc.getId())))));
     }
 
     @Test
