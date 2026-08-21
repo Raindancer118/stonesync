@@ -26,6 +26,10 @@ import java.util.UUID;
  * its vault, mints a fresh device API key, and hands back a small HTML page whose one link is
  * an {@code obsidian://} deep link carrying everything the plugin needs to auto-configure
  * itself - no manual copy-pasting of server URL/API key/vault ID.
+ *
+ * <p>A login with no pending invite token in the session (i.e. one that didn't start at
+ * {@link AuthentikLoginController#startInviteLogin}) is a regular dashboard login instead - see
+ * {@link de.tstieh.stonesync.dashboard.DashboardController}.</p>
  */
 @Component
 public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandler {
@@ -61,9 +65,8 @@ public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandle
         }
 
         if (!(pendingToken instanceof String rawToken)) {
-            AppLog.warn("Authentik login succeeded but no pending invite token was found in the session");
-            writeErrorPage(response, "No pending invite found for this login. Please use a valid "
-                    + "invite link (https://.../invite/&lt;token&gt;) to start.");
+            AppLog.debug("Authentik login succeeded with no pending invite token - routing to the dashboard");
+            response.sendRedirect(request.getContextPath() + "/dashboard");
             return;
         }
 
@@ -75,12 +78,12 @@ public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandle
         try {
             redeemed = inviteService.redeem(rawToken, email);
         } catch (InviteNotFoundException | InviteNoLongerValidException e) {
-            writeErrorPage(response, "This invite link is no longer valid: " + escapeHtml(e.getMessage())
+            writeErrorPage(response, "This invite link is no longer valid: " + HtmlEscaper.escape(e.getMessage())
                     + ". Please ask for a new one.");
             return;
         } catch (InviteEmailMismatchException e) {
             writeErrorPage(response, "This invite was created for a different email address than the "
-                    + "one you just logged in with (" + escapeHtml(email) + "). Please ask for a new invite "
+                    + "one you just logged in with (" + HtmlEscaper.escape(email) + "). Please ask for a new invite "
                     + "addressed to you, or log into Authentik with the correct account.");
             return;
         }
@@ -122,7 +125,7 @@ public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandle
                 <p><a href="%s" style="display:inline-block; padding: 0.8em 1.5em; background:#5865f2; color:white; text-decoration:none; border-radius:6px; font-size:1.1em;">Open in Obsidian</a></p>
                 <p style="color:#666; font-size:0.9em;">(Requires Obsidian and the StoneSync plugin to already be installed.)</p>
                 </body></html>
-                """.formatted(escapeHtml(displayName), deepLink));
+                """.formatted(HtmlEscaper.escape(displayName), deepLink));
     }
 
     private void writeErrorPage(HttpServletResponse response, String message) throws IOException {
@@ -138,7 +141,4 @@ public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandle
                 """.formatted(message));
     }
 
-    private static String escapeHtml(String value) {
-        return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
-    }
 }

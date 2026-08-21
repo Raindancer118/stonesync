@@ -10,6 +10,8 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 
 @Configuration
 @EnableWebSecurity
@@ -25,11 +27,15 @@ public class SecurityConfig {
 
     /**
      * Entirely separate auth mechanism for an entirely separate URL space: the browser-based
-     * collaborator-invite login (session cookies + Authentik OAuth2 login), vs. the Bearer
-     * API-key auth every other endpoint below uses. Ordered before the default chain so these
-     * paths never hit {@link ApiKeyAuthFilter} (which would otherwise require a Bearer header
-     * that a plain browser visit never sends, well before OAuth2 login even gets a chance to
-     * run).
+     * collaborator-invite login and the self-service dashboard (session cookies + Authentik
+     * OAuth2 login), vs. the Bearer API-key auth every other endpoint below uses. Ordered before
+     * the default chain so these paths never hit {@link ApiKeyAuthFilter} (which would otherwise
+     * require a Bearer header that a plain browser visit never sends, well before OAuth2 login
+     * even gets a chance to run).
+     *
+     * <p>{@code /dashboard/**} requires an authenticated session - visiting it unauthenticated is
+     * exactly what triggers {@code oauth2Login}'s redirect into Authentik in the first place, so
+     * that's also the URL an Authentik "launch" link should point at.</p>
      */
     @Bean
     @Order(1)
@@ -37,11 +43,26 @@ public class SecurityConfig {
     public SecurityFilterChain oauthLoginFilterChain(HttpSecurity http, AuthentikLoginSuccessHandler successHandler)
             throws Exception {
         http
-                .securityMatcher("/login/**", "/oauth2/**", "/invite/**", "/api/auth/exchange")
-                // /api/auth/exchange is the one state-changing POST on this surface: it hands out
-                // a device's very first credential before any session/CSRF token could exist.
-                .csrf(csrf -> csrf.disable())
-                .authorizeHttpRequests(authorize -> authorize.anyRequest().permitAll())
+                .securityMatcher("/login/**", "/oauth2/**", "/invite/**", "/api/auth/exchange", "/dashboard/**")
+                // /api/auth/exchange is the one state-changing POST on this surface that must stay
+                // reachable with no session/CSRF token yet - it hands out a device's very first
+                // credential. The dashboard's invite-creation POST is a normal session-authenticated
+                // form submission and DOES get CSRF-protected (cookie-based repository, since no
+                // templating engine is configured to embed the token via a request attribute).
+                //
+                // Explicit plain CsrfTokenRequestAttributeHandler rather than Spring Security 6's
+                // default (BREACH-protection XorCsrfTokenRequestAttributeHandler): that default
+                // expects the submitted token to be XOR-masked relative to the actual one, which is
+                // only handled automatically for you by Thymeleaf's th:action / a JS layer reading a
+                // meta tag - DashboardController hand-writes the form and embeds csrfToken.getToken()
+                // literally, so the request handler has to expect that same raw value back.
+                .csrf(csrf -> csrf
+                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                        .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+                        .ignoringRequestMatchers("/api/auth/exchange"))
+                .authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers("/dashboard/**").authenticated()
+                        .anyRequest().permitAll())
                 .oauth2Login(oauth2 -> oauth2.successHandler(successHandler));
         return http.build();
     }
