@@ -3,6 +3,7 @@ import { downloadAttachment } from "../attachments/AttachmentDownload";
 import { DocumentSession } from "./DocumentSession";
 import { ensureParentFolders } from "./ensureParentFolders";
 import type { StoneSyncSettings } from "../settings/StoneSyncSettings";
+import { wasRecentlyDeleted } from "./recentlyDeleted";
 
 export interface DocumentDownloaderOptions {
 	app: App;
@@ -20,6 +21,7 @@ export interface DocumentDownloaderOptions {
 export async function downloadTextDocument(options: DocumentDownloaderOptions, documentId: string, path: string): Promise<void> {
 	const { app, settings, userName, userColor } = options;
 	if (await app.vault.adapter.exists(path)) return;
+	if (wasRecentlyDeleted(path)) return; // see recentlyDeleted.ts
 
 	const session = new DocumentSession({
 		documentId,
@@ -36,7 +38,10 @@ export async function downloadTextDocument(options: DocumentDownloaderOptions, d
 		await caughtUp;
 
 		await ensureParentFolders(app.vault.adapter, path);
-		if (await app.vault.adapter.exists(path)) return; // race guard: created concurrently meanwhile
+		// Race guards: created concurrently meanwhile, or deleted while this download was in
+		// flight (the network round-trip above is exactly the window that race needs).
+		if (await app.vault.adapter.exists(path)) return;
+		if (wasRecentlyDeleted(path)) return;
 		await app.vault.adapter.write(path, session.ytext.toString());
 	} finally {
 		session.destroy();
@@ -46,10 +51,12 @@ export async function downloadTextDocument(options: DocumentDownloaderOptions, d
 export async function downloadAttachmentDocument(options: DocumentDownloaderOptions, documentId: string, path: string): Promise<void> {
 	const { app, settings } = options;
 	if (await app.vault.adapter.exists(path)) return;
+	if (wasRecentlyDeleted(path)) return; // see recentlyDeleted.ts
 
 	const bytes = await downloadAttachment(settings.serverUrl, settings.apiKey, documentId);
 
 	await ensureParentFolders(app.vault.adapter, path);
 	if (await app.vault.adapter.exists(path)) return; // race guard: created concurrently meanwhile
+	if (wasRecentlyDeleted(path)) return; // race guard: deleted while this download was in flight
 	await app.vault.adapter.writeBinary(path, bytes);
 }

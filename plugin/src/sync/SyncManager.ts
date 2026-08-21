@@ -4,6 +4,7 @@ import { DocumentSession } from "./DocumentSession";
 import { DocumentIdResolver } from "./DocumentIdResolver";
 import { deleteDocument } from "./DocumentDeleteClient";
 import { resolveDeleteDocumentId } from "./resolveDeleteDocumentId";
+import { markRecentlyDeleted } from "./recentlyDeleted";
 import { syncCompartment, buildCollabExtension, emptyExtension } from "../editor/syncExtension";
 import { decideReconciliation } from "./reconcile";
 import { PermissionsClient } from "../access/PermissionsClient";
@@ -472,6 +473,11 @@ export class SyncManager {
 	 * arrived via a bulk vault download - used to silently never reach the server at all).
 	 */
 	async handleDelete(path: string): Promise<void> {
+		// See recentlyDeleted.ts: closes the "a slow-draining reconciliation/download queue
+		// re-downloads a file I just deleted" race - mark this immediately, before anything else
+		// (including the network round-trips below) can race with it.
+		markRecentlyDeleted(path);
+
 		const settings = this.getSettings();
 		if (!isConfigured(settings)) {
 			this.unbind(path);

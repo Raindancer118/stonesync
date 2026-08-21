@@ -1,6 +1,6 @@
 {
   "name": "stonesync",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "description": "Live-Multi-User-Sync für Obsidian-Vaults (Yjs CRDT + Live-Cursor-Presence)",
   "main": "main.js",
   "type": "module",
