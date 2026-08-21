@@ -18,10 +18,15 @@ export interface DocumentDownloaderOptions {
  * time, as a colleague's "document_created" event arrives). Never overwrites a file that already
  * exists locally.
  */
+function isDeletePending(settings: StoneSyncSettings, path: string): boolean {
+	return (settings.pendingDeletePaths ?? []).includes(path);
+}
+
 export async function downloadTextDocument(options: DocumentDownloaderOptions, documentId: string, path: string): Promise<void> {
 	const { app, settings, userName, userColor } = options;
 	if (await app.vault.adapter.exists(path)) return;
 	if (wasRecentlyDeleted(path)) return; // see recentlyDeleted.ts
+	if (isDeletePending(settings, path)) return; // not yet confirmed deleted server-side - do not resurrect it
 
 	const session = new DocumentSession({
 		documentId,
@@ -42,6 +47,7 @@ export async function downloadTextDocument(options: DocumentDownloaderOptions, d
 		// flight (the network round-trip above is exactly the window that race needs).
 		if (await app.vault.adapter.exists(path)) return;
 		if (wasRecentlyDeleted(path)) return;
+		if (isDeletePending(settings, path)) return;
 		await app.vault.adapter.write(path, session.ytext.toString());
 	} finally {
 		session.destroy();
@@ -52,11 +58,13 @@ export async function downloadAttachmentDocument(options: DocumentDownloaderOpti
 	const { app, settings } = options;
 	if (await app.vault.adapter.exists(path)) return;
 	if (wasRecentlyDeleted(path)) return; // see recentlyDeleted.ts
+	if (isDeletePending(settings, path)) return;
 
 	const bytes = await downloadAttachment(settings.serverUrl, settings.apiKey, documentId);
 
 	await ensureParentFolders(app.vault.adapter, path);
 	if (await app.vault.adapter.exists(path)) return; // race guard: created concurrently meanwhile
 	if (wasRecentlyDeleted(path)) return; // race guard: deleted while this download was in flight
+	if (isDeletePending(settings, path)) return;
 	await app.vault.adapter.writeBinary(path, bytes);
 }

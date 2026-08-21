@@ -10,10 +10,19 @@
  * writing - only "does the local file already exist", which is false right after a delete.
  *
  * `SyncManager.handleDelete` marks a path here the moment it starts deleting; every downloader
- * checks it first and skips instead of resurrecting the file. A short TTL (not a permanent
- * blocklist) so a colleague genuinely re-creating the same path later is not silently ignored.
+ * checks it first and skips instead of resurrecting the file. A TTL (not a permanent blocklist)
+ * so a colleague genuinely re-creating the same path later is not silently ignored.
+ *
+ * Live incident found this set too short: a bulk delete of ~1300 files queues that many
+ * `resolveDeleteDocumentId` + `deleteDocument` round-trips, and under that load individual
+ * deletes can take well over a minute to actually land server-side. Any reconciliation pass
+ * (triggered by a websocket reconnect, which server-side load itself makes more likely) that
+ * lands after the mark expired but before the delete confirmed re-downloaded the file - forever,
+ * since nothing deletes it a second time. 30 minutes comfortably covers realistic bulk-delete
+ * drain times; see also the `pendingDeletePaths` check in `DocumentDownloader`, which guards the
+ * same race for deletes still queued for offline retry regardless of how long that takes.
  */
-const RECENTLY_DELETED_TTL_MS = 60_000;
+const RECENTLY_DELETED_TTL_MS = 30 * 60_000;
 
 const recentlyDeleted = new Map<string, number>();
 

@@ -23,7 +23,7 @@ describe("recentlyDeleted", () => {
 	it("stops reporting a path as recently deleted once the TTL has passed", () => {
 		markRecentlyDeleted("Notes/gone.md");
 
-		vi.advanceTimersByTime(61_000);
+		vi.advanceTimersByTime(30 * 60_000 + 1_000);
 
 		expect(wasRecentlyDeleted("Notes/gone.md")).toBe(false);
 	});
@@ -31,7 +31,7 @@ describe("recentlyDeleted", () => {
 	it("still reports it just before the TTL expires", () => {
 		markRecentlyDeleted("Notes/gone.md");
 
-		vi.advanceTimersByTime(59_000);
+		vi.advanceTimersByTime(30 * 60_000 - 1_000);
 
 		expect(wasRecentlyDeleted("Notes/gone.md")).toBe(true);
 	});
