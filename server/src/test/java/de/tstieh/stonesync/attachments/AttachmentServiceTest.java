@@ -232,6 +232,29 @@ class AttachmentServiceTest {
         verify(textExtractionService, never()).extractAndIndex(eq(orphanedAttachmentDocId), any(), any());
     }
 
+    @Test
+    @DisplayName("reindexing retries a submission the bounded extraction queue rejected, instead of dropping it")
+    void reindexVaultRetriesOnQueueBackpressure() {
+        UUID vaultId = UUID.randomUUID();
+        UUID attachmentDocId = UUID.randomUUID();
+        when(documentService.listNonDeletedForRestore(vaultId)).thenReturn(List.of(
+                new DocumentService.DocumentSummary(attachmentDocId, "Assets/big.png", DocumentEntity.ContentType.ATTACHMENT)));
+        byte[] bytes = {1};
+        when(repository.findById(attachmentDocId)).thenReturn(
+                Optional.of(new AttachmentEntity(attachmentDocId, "hash", bytes.length, "/data/vault/hash", Instant.now())));
+        when(storage.load("/data/vault/hash")).thenReturn(bytes);
+        org.mockito.Mockito.doThrow(new org.springframework.core.task.TaskRejectedException("full"))
+                .doThrow(new org.springframework.core.task.TaskRejectedException("still full"))
+                .doNothing()
+                .when(textExtractionService).extractAndIndex(attachmentDocId, bytes, "Assets/big.png");
+
+        int queued = service.reindexVault(vaultId);
+
+        assertThat(queued).isEqualTo(1);
+        verify(textExtractionService, org.mockito.Mockito.times(3))
+                .extractAndIndex(attachmentDocId, bytes, "Assets/big.png");
+    }
+
     private static String sha256Hex(byte[] bytes) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

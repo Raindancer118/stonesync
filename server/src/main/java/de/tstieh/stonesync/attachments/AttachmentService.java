@@ -8,6 +8,7 @@ import de.tstieh.stonesync.logging.AppLog;
 import de.tstieh.stonesync.search.AttachmentTextExtractionService;
 import de.tstieh.stonesync.sync.DocumentEntity;
 import de.tstieh.stonesync.sync.DocumentService;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -112,10 +113,15 @@ public class AttachmentService {
 
     /**
      * Queues text extraction/OCR for every attachment already stored in a vault - needed once,
-     * after adding full-text search, since {@link #upload} only extracts text going forward.
-     * Fire-and-forget: {@link AttachmentTextExtractionService#extractAndIndex} is {@code @Async}
-     * on its own small pool, so this returns almost immediately with just the count queued;
-     * the actual OCR/PDF work happens in the background over the following minutes.
+     * after adding full-text search, since {@link #upload} only extracts text going forward. A
+     * vault can easily have hundreds of attachments, far more than the extraction pool's bounded
+     * queue capacity (see {@code AsyncConfig}) - submitting them all in a tight loop overflows it
+     * and {@code @Async} rejects the excess synchronously back to this thread. Rather than making
+     * that queue unbounded (each queued item holds the attachment's full byte[] in memory, so an
+     * unbounded queue risks exhausting heap on a large vault), this call blocks - retrying a
+     * rejected submission after a short pause - until every attachment is actually queued. That
+     * makes the HTTP call itself slow for a big vault, which is fine for a one-off admin/console
+     * operation; see {@code ss-reindex-attachments}.
      */
     public int reindexVault(UUID vaultId) {
         int queued = 0;
@@ -128,11 +134,38 @@ public class AttachmentService {
                 continue;
             }
             byte[] bytes = storage.load(entity.get().getStoragePath());
-            textExtractionService.extractAndIndex(summary.id(), bytes, summary.path());
+            queueWithBackpressure(summary.id(), bytes, summary.path());
             queued++;
         }
         AppLog.info("Queued text extraction for {} existing attachments in vault {}", queued, vaultId);
         return queued;
+    }
+
+    private static final int MAX_QUEUE_RETRIES = 300;
+    private static final long QUEUE_RETRY_DELAY_MILLIS = 200;
+
+    private void queueWithBackpressure(UUID documentId, byte[] bytes, String path) {
+        for (int attempt = 1; attempt <= MAX_QUEUE_RETRIES; attempt++) {
+            try {
+                textExtractionService.extractAndIndex(documentId, bytes, path);
+                return;
+            } catch (TaskRejectedException e) {
+                if (attempt == MAX_QUEUE_RETRIES) {
+                    AppLog.warn("Gave up queuing text extraction for {} after {} attempts - pool stayed full",
+                            documentId, MAX_QUEUE_RETRIES);
+                    return;
+                }
+                sleepQuietly(QUEUE_RETRY_DELAY_MILLIS);
+            }
+        }
+    }
+
+    private static void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static String sha256Hex(byte[] bytes) {
