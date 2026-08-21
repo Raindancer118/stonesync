@@ -24,6 +24,7 @@ COPY console/help \
      console/ss-create-user console/ss-delete-user console/ss-create-vault console/ss-delete-vault \
      console/ss-grant-access console/ss-revoke-access console/ss-create-apikey console/ss-revoke-apikey \
      console/ss-create-invite \
+     console/ss-reindex-attachments \
      console/ss-git-log console/ss-vault-restore \
      console/ss-access console/ss-rule-set console/ss-rule-rm console/ss-audit \
      console/ss-file-history console/ss-make-admin \

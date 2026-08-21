@@ -1,5 +1,6 @@
 package de.tstieh.stonesync.admin;
 
+import de.tstieh.stonesync.attachments.AttachmentService;
 import de.tstieh.stonesync.auth.ApiKeyEntity;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -20,9 +21,11 @@ import java.util.UUID;
 public class AdminController {
 
     private final AdminService adminService;
+    private final AttachmentService attachmentService;
 
-    public AdminController(AdminService adminService) {
+    public AdminController(AdminService adminService, AttachmentService attachmentService) {
         this.adminService = adminService;
+        this.attachmentService = attachmentService;
     }
 
     @PostMapping("/users")
@@ -93,6 +96,12 @@ public class AdminController {
         adminService.revokeApiKey(apiKeyId);
     }
 
+    /** See {@link AttachmentService#reindexVault} - a one-time backfill after adding search. */
+    @PostMapping("/vaults/{vaultId}/reindex-attachments")
+    public ReindexResponse reindexAttachments(@PathVariable UUID vaultId) {
+        return new ReindexResponse(attachmentService.reindexVault(vaultId));
+    }
+
     private UserResponse toResponse(UserEntity user) {
         return new UserResponse(user.getId(), user.getEmail());
     }
@@ -122,5 +131,8 @@ public class AdminController {
     }
 
     public record ApiKeyListEntry(UUID id, String name, Instant createdAt, Instant revokedAt) {
+    }
+
+    public record ReindexResponse(int queued) {
     }
 }

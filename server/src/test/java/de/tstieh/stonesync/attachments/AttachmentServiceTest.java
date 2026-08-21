@@ -3,6 +3,7 @@ package de.tstieh.stonesync.attachments;
 import de.tstieh.stonesync.admin.VaultAccessDeniedException;
 import de.tstieh.stonesync.admin.VaultAccessService;
 import de.tstieh.stonesync.search.AttachmentTextExtractionService;
+import de.tstieh.stonesync.sync.DocumentEntity;
 import de.tstieh.stonesync.sync.DocumentService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -17,6 +18,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -202,6 +204,32 @@ class AttachmentServiceTest {
         byte[] downloaded = realService.download(userId, documentId);
 
         assertThat(downloaded).isEqualTo(bytes);
+    }
+
+    @Test
+    @DisplayName("reindexing a vault queues extraction for every existing attachment, but skips notes and missing rows")
+    void reindexVaultQueuesExtractionForExistingAttachmentsOnly() {
+        UUID vaultId = UUID.randomUUID();
+        UUID attachmentDocId = UUID.randomUUID();
+        UUID noteDocId = UUID.randomUUID();
+        UUID orphanedAttachmentDocId = UUID.randomUUID();
+        when(documentService.listNonDeletedForRestore(vaultId)).thenReturn(List.of(
+                new DocumentService.DocumentSummary(attachmentDocId, "Assets/photo.png", DocumentEntity.ContentType.ATTACHMENT),
+                new DocumentService.DocumentSummary(noteDocId, "Notes/plan.md", DocumentEntity.ContentType.TEXT),
+                new DocumentService.DocumentSummary(orphanedAttachmentDocId, "Assets/gone.png", DocumentEntity.ContentType.ATTACHMENT)
+        ));
+        byte[] bytes = {5, 6, 7};
+        when(repository.findById(attachmentDocId)).thenReturn(
+                Optional.of(new AttachmentEntity(attachmentDocId, "hash", bytes.length, "/data/vault/hash", Instant.now())));
+        when(repository.findById(orphanedAttachmentDocId)).thenReturn(Optional.empty());
+        when(storage.load("/data/vault/hash")).thenReturn(bytes);
+
+        int queued = service.reindexVault(vaultId);
+
+        assertThat(queued).isEqualTo(1);
+        verify(textExtractionService).extractAndIndex(attachmentDocId, bytes, "Assets/photo.png");
+        verify(textExtractionService, never()).extractAndIndex(eq(noteDocId), any(), any());
+        verify(textExtractionService, never()).extractAndIndex(eq(orphanedAttachmentDocId), any(), any());
     }
 
     private static String sha256Hex(byte[] bytes) {

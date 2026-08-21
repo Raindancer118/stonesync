@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+. /usr/local/bin/admin-env.sh
+
+if [ "${1:-}" = "" ]; then
+	echo "Usage: ss-reindex-attachments <vaultId>" >&2
+	echo "(run ss-vaults first to find the vault id - queues text extraction/OCR for" >&2
+	echo "every attachment already stored in that vault; needed once after upgrading" >&2
+	echo "to a StoneSync version that added full-text search, since new uploads are" >&2
+	echo "indexed automatically but pre-existing ones are not)" >&2
+	exit 1
+fi
+
+curl -sf -X POST "$ADMIN_BASE/vaults/$1/reindex-attachments" -H "$ADMIN_AUTH" | jq .

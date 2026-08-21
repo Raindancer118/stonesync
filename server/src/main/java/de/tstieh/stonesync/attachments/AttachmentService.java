@@ -6,6 +6,7 @@ import de.tstieh.stonesync.audit.AuditEventType;
 import de.tstieh.stonesync.audit.AuditService;
 import de.tstieh.stonesync.logging.AppLog;
 import de.tstieh.stonesync.search.AttachmentTextExtractionService;
+import de.tstieh.stonesync.sync.DocumentEntity;
 import de.tstieh.stonesync.sync.DocumentService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -107,6 +108,31 @@ public class AttachmentService {
                 });
         AppLog.debug("Serving attachment download for document {}", documentId);
         return storage.load(entity.getStoragePath());
+    }
+
+    /**
+     * Queues text extraction/OCR for every attachment already stored in a vault - needed once,
+     * after adding full-text search, since {@link #upload} only extracts text going forward.
+     * Fire-and-forget: {@link AttachmentTextExtractionService#extractAndIndex} is {@code @Async}
+     * on its own small pool, so this returns almost immediately with just the count queued;
+     * the actual OCR/PDF work happens in the background over the following minutes.
+     */
+    public int reindexVault(UUID vaultId) {
+        int queued = 0;
+        for (DocumentService.DocumentSummary summary : documentService.listNonDeletedForRestore(vaultId)) {
+            if (summary.contentType() != DocumentEntity.ContentType.ATTACHMENT) {
+                continue;
+            }
+            Optional<AttachmentEntity> entity = repository.findById(summary.id());
+            if (entity.isEmpty()) {
+                continue;
+            }
+            byte[] bytes = storage.load(entity.get().getStoragePath());
+            textExtractionService.extractAndIndex(summary.id(), bytes, summary.path());
+            queued++;
+        }
+        AppLog.info("Queued text extraction for {} existing attachments in vault {}", queued, vaultId);
+        return queued;
     }
 
     private static String sha256Hex(byte[] bytes) {
