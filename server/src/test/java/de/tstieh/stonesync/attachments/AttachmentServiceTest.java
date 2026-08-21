@@ -2,6 +2,7 @@ package de.tstieh.stonesync.attachments;
 
 import de.tstieh.stonesync.admin.VaultAccessDeniedException;
 import de.tstieh.stonesync.admin.VaultAccessService;
+import de.tstieh.stonesync.search.AttachmentTextExtractionService;
 import de.tstieh.stonesync.sync.DocumentService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -42,6 +43,8 @@ class AttachmentServiceTest {
     private VaultAccessService vaultAccessService;
     @Mock
     private de.tstieh.stonesync.audit.AuditService auditService;
+    @Mock
+    private AttachmentTextExtractionService textExtractionService;
 
     private AttachmentService service;
     private final UUID documentId = UUID.randomUUID();
@@ -50,7 +53,8 @@ class AttachmentServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AttachmentService(repository, storage, documentService, vaultAccessService, auditService);
+        service = new AttachmentService(repository, storage, documentService, vaultAccessService, auditService,
+                textExtractionService);
         lenient().when(documentService.vaultIdOf(documentId)).thenReturn(vaultId);
         lenient().when(documentService.locateForWrite(userId, documentId))
                 .thenReturn(new DocumentService.DocumentLocation(vaultId, "assets/image.png"));
@@ -182,7 +186,8 @@ class AttachmentServiceTest {
     @DisplayName("download reads back the exact bytes that were stored, round-tripped through the real filesystem storage")
     void downloadRoundTripsRealBytesThroughFilesystemStorage(@TempDir Path tempDir) {
         FileSystemAttachmentStorage realStorage = new FileSystemAttachmentStorage(new StorageProperties(tempDir.toString()));
-        AttachmentService realService = new AttachmentService(repository, realStorage, documentService, vaultAccessService, auditService);
+        AttachmentService realService = new AttachmentService(repository, realStorage, documentService, vaultAccessService,
+                auditService, textExtractionService);
         byte[] bytes = "round-trip content, exact bytes expected back".getBytes();
         String hash = sha256Hex(bytes);
         when(repository.findById(documentId)).thenReturn(Optional.empty());

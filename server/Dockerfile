@@ -10,9 +10,11 @@ WORKDIR /app
 
 # curl (admin API + health calls) + psql (ad-hoc DB inspection) + jq (formatting
 # admin API responses) for the console scripts below - diagnostic/ops tooling,
-# not app dependencies.
+# not app dependencies. tesseract-ocr (+ eng/deu language data) IS an app dependency:
+# OcrService shells out to the `tesseract` binary for image/scanned-PDF full-text search.
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends curl postgresql-client jq \
+	   tesseract-ocr tesseract-ocr-eng tesseract-ocr-deu \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /build/target/stonesync-server.jar app.jar

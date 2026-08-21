@@ -150,9 +150,10 @@ public class DashboardController {
         return """
                 <div style="border:1px solid #ddd; border-radius:6px; padding:1em; margin:1em 0;">
                   <strong>%s</strong> <span style="color:#666;">(%s)</span>
+                  &mdash; <a href="/dashboard/vaults/%s">Browse &amp; search</a>
                   %s
                 </div>
-                """.formatted(HtmlEscaper.escape(vault.getName()), role, inviteForm);
+                """.formatted(HtmlEscaper.escape(vault.getName()), role, vault.getId(), inviteForm);
     }
 
     private String renderInviteForm(UUID vaultId, CsrfToken csrfToken) {

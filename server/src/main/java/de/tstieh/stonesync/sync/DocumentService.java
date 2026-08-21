@@ -215,6 +215,20 @@ public class DocumentService {
                 });
     }
 
+    /**
+     * Refreshes the search-only plaintext copy of a document (see {@link DocumentEntity#getPlainText()}).
+     * No permission check: every caller ({@code MaterializeService}, {@code
+     * AttachmentTextExtractionService}) already required write access before deciding there is
+     * new content worth indexing.
+     */
+    @Transactional
+    public void updatePlainText(UUID documentId, String plainText) {
+        repository.findById(documentId).ifPresent(document -> {
+            document.updatePlainText(plainText);
+            repository.save(document);
+        });
+    }
+
     /** System-level counterpart to {@link #markDeleted} - see {@link #listNonDeletedForRestore}. */
     @Transactional
     public void markDeletedForRestore(UUID documentId) {

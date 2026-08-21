@@ -52,6 +52,10 @@ public class MaterializeService {
         // Materialize is the only place the server sees plaintext, so it is also the only place
         // the cross-vault link index can be maintained - the Yjs path stays an opaque relay.
         linkIndexService.reindex(documentId, location.vaultId(), content);
+        // Same reasoning for full-text search (see migration V7): keep the note's search-only
+        // plaintext copy current, regardless of whether this particular debounce tick actually
+        // changed the git-committed content.
+        documentService.updatePlainText(documentId, content);
 
         if (committed) {
             // Only on a real change: the client re-materializes on a debounce timer, and an

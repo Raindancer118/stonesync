@@ -36,6 +36,16 @@ public class DocumentEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    /**
+     * Plaintext used for full-text search only (see migration V7 for the generated
+     * {@code search_vector} column/trigger) - notes get it from the materialize side-channel,
+     * attachments from {@code AttachmentTextExtractionService} (PDF text / OCR). Never used to
+     * reconstruct actual content: for TEXT documents the Yjs update log remains the only source
+     * of truth, this is a lossy, search-only copy that can lag behind by a few seconds.
+     */
+    @Column(name = "plain_text")
+    private String plainText;
+
     protected DocumentEntity() {
         // JPA
     }
@@ -89,6 +99,15 @@ public class DocumentEntity {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public String getPlainText() {
+        return plainText;
+    }
+
+    /** Search-index-only - does not touch {@code updatedAt} (that reflects real content edits). */
+    public void updatePlainText(String plainText) {
+        this.plainText = plainText;
     }
 
     public enum ContentType {

@@ -96,6 +96,24 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Vault viewer: renders a note's plaintext (already decoded by materialize) as HTML.
+             escapeHtml(true) is used when building the renderer, so raw HTML embedded in a note
+             is escaped rather than passed through - one vault member's note must never be able to
+             run script in another member's browser. -->
+        <dependency>
+            <groupId>org.commonmark</groupId>
+            <artifactId>commonmark</artifactId>
+            <version>0.24.0</version>
+        </dependency>
+
+        <!-- Full-text search: extracts embedded text from uploaded PDFs (OCR - see console
+             tesseract binary in the Dockerfile - covers the scanned-page fallback and images). -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.7</version>
+        </dependency>
+
         <!-- Tests -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

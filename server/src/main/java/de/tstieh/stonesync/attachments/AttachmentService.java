@@ -5,6 +5,7 @@ import de.tstieh.stonesync.admin.VaultAccessService;
 import de.tstieh.stonesync.audit.AuditEventType;
 import de.tstieh.stonesync.audit.AuditService;
 import de.tstieh.stonesync.logging.AppLog;
+import de.tstieh.stonesync.search.AttachmentTextExtractionService;
 import de.tstieh.stonesync.sync.DocumentService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,15 +36,17 @@ public class AttachmentService {
     private final DocumentService documentService;
     private final VaultAccessService vaultAccessService;
     private final AuditService auditService;
+    private final AttachmentTextExtractionService textExtractionService;
 
     public AttachmentService(AttachmentRepository repository, FileSystemAttachmentStorage storage,
                               DocumentService documentService, VaultAccessService vaultAccessService,
-                              AuditService auditService) {
+                              AuditService auditService, AttachmentTextExtractionService textExtractionService) {
         this.repository = repository;
         this.storage = storage;
         this.documentService = documentService;
         this.vaultAccessService = vaultAccessService;
         this.auditService = auditService;
+        this.textExtractionService = textExtractionService;
     }
 
     public boolean isKnown(String contentHash) {
@@ -72,6 +75,7 @@ public class AttachmentService {
             auditService.record(AuditEventType.ATTACHMENT_UPLOADED, userId, vaultId, documentId, location.path(),
                     null, bytes.length + " bytes");
             AppLog.info("Stored new attachment for document {} ({} bytes, hash {})", documentId, bytes.length, contentHash);
+            textExtractionService.extractAndIndex(documentId, bytes, location.path());
             return;
         }
 
@@ -89,6 +93,7 @@ public class AttachmentService {
         auditService.record(AuditEventType.ATTACHMENT_UPLOADED, userId, vaultId, documentId, location.path(), null,
                 bytes.length + " bytes (replaced)");
         AppLog.info("Updated attachment for document {} ({} bytes, hash {})", documentId, bytes.length, contentHash);
+        textExtractionService.extractAndIndex(documentId, bytes, location.path());
     }
 
     /** Streams back the stored bytes for a document's attachment, after verifying vault access. */
