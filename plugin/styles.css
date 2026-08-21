@@ -95,6 +95,187 @@
 	cursor: pointer;
 }
 
+/*
+ * "Dark Stone" brand palette - same tokens as the web dashboard (see Design.md/PageShell
+ * server-side): warm near-black surfaces, muted heather-violet accent, clay/ochre secondary.
+ * Scoped to StoneSync's own branded surfaces (home view, quick-search results, sync queue) -
+ * everywhere else in the plugin deliberately uses Obsidian's own theme variables instead, to
+ * blend into the user's chosen Obsidian theme rather than fight it.
+ *
+ * Deliberately no external font loading (no Google Fonts @import): a plugin that stops looking
+ * right the moment the user is offline is worse than one that uses a good system serif/mono
+ * fallback stack - `Design.md`'s Fraunces/IBM Plex Mono are a web-only detail, not reproduced here.
+ */
+.stonesync-home-view {
+	--ss-bg: #17151b;
+	--ss-surface: #1f1c24;
+	--ss-surface-raised: #272330;
+	--ss-stroke: #37323f;
+	--ss-text: #ece7e2;
+	--ss-text-muted: #a79fb0;
+	--ss-accent: #9b7fc4;
+	--ss-accent-strong: #b699dd;
+	--ss-warm: #c98a4b;
+	background: var(--ss-bg);
+	color: var(--ss-text);
+	height: 100%;
+	overflow-y: auto;
+	padding: 3rem 2rem;
+}
+
+.stonesync-home-hero {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	min-height: min(60vh, 28rem);
+	text-align: center;
+}
+
+.stonesync-home-wordmark {
+	font-family: Georgia, "Times New Roman", serif;
+	font-size: 2.4rem;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+	margin-bottom: 1.75rem;
+}
+
+.stonesync-home-wordmark-accent {
+	color: var(--ss-accent);
+}
+
+.stonesync-home-hero form {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	background: var(--ss-surface-raised);
+	border: 1px solid var(--ss-stroke);
+	border-radius: 999px;
+	padding: 0.5rem 0.5rem 0.5rem 1.6rem;
+	width: 100%;
+	max-width: 34rem;
+	box-shadow: 0 14px 38px -16px rgba(0, 0, 0, 0.6);
+}
+
+.stonesync-home-hero form:focus-within {
+	border-color: var(--ss-accent);
+	box-shadow: 0 0 0 3px rgba(155, 127, 196, 0.22), 0 14px 38px -16px rgba(0, 0, 0, 0.6);
+}
+
+.stonesync-home-input {
+	flex: 1;
+	background: none;
+	border: none;
+	padding: 0.7rem 0.2rem;
+	font-size: 1.1rem;
+	color: var(--ss-text);
+}
+
+.stonesync-home-input:focus {
+	outline: none;
+	box-shadow: none;
+}
+
+.stonesync-home-search-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 2.8rem;
+	height: 2.8rem;
+	border-radius: 999px;
+	background: var(--ss-accent);
+	color: var(--ss-bg);
+	border: none;
+	cursor: pointer;
+	font-size: 1.15rem;
+	flex: 0 0 auto;
+	box-shadow: none;
+}
+
+.stonesync-home-search-btn:hover {
+	background: var(--ss-accent-strong);
+}
+
+.stonesync-home-hint {
+	color: var(--ss-text-muted);
+	font-size: 0.85rem;
+	margin-top: 1rem;
+}
+
+.stonesync-home-results {
+	max-width: 42rem;
+	margin: 0 auto;
+}
+
+.stonesync-home-hit {
+	padding: 0.9rem 1.1rem;
+	border: 1px solid var(--ss-stroke);
+	border-radius: 12px;
+	margin-bottom: 0.6rem;
+	background: var(--ss-surface);
+	cursor: pointer;
+}
+
+.stonesync-home-hit.is-highlighted,
+.stonesync-home-hit:hover {
+	border-color: var(--ss-accent);
+}
+
+.stonesync-home-hit-path {
+	font-family: var(--font-monospace, monospace);
+	font-size: 0.88rem;
+	color: var(--ss-accent-strong);
+}
+
+.stonesync-home-hit-snippet {
+	color: var(--ss-text-muted);
+	font-size: 0.88rem;
+	margin-top: 0.35rem;
+}
+
+.stonesync-home-hit-snippet mark {
+	background: rgba(201, 138, 75, 0.28);
+	color: var(--ss-text);
+	padding: 0 0.15em;
+	border-radius: 3px;
+}
+
+.stonesync-quicksearch-suggestion {
+	padding: 0.3em 0;
+}
+
+.stonesync-quicksearch-path {
+	font-family: var(--font-monospace, monospace);
+	font-size: 0.92em;
+}
+
+.stonesync-quicksearch-snippet {
+	color: var(--text-muted);
+	font-size: 0.85em;
+	margin-top: 0.2em;
+}
+
+.stonesync-quicksearch-snippet mark {
+	background: rgba(201, 138, 75, 0.35);
+	border-radius: 3px;
+	padding: 0 0.15em;
+}
+
+.stonesync-queue-modal .stonesync-queue-list {
+	margin-bottom: 1em;
+}
+
+.stonesync-queue-modal .stonesync-queue-empty {
+	color: var(--text-muted);
+	font-size: 0.9em;
+}
+
+.stonesync-queue-modal .stonesync-queue-hint {
+	color: var(--text-muted);
+	font-size: 0.85em;
+	margin: -0.4em 0 0.6em;
+}
+
 .stonesync-cross-link::before {
 	content: "⇗ ";
 	opacity: 0.7;

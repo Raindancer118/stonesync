@@ -41,6 +41,20 @@ export interface StoneSyncSettings {
 	 * final only on this device: the server never learned about it at all, not even later.
 	 */
 	pendingDeletePaths?: string[];
+	/**
+	 * Auto-opens the StoneSync home view (`StoneSyncHomeView` - branded landing tab with the
+	 * server-backed search bar) once, after every Obsidian startup. Defaults to `true`: this is
+	 * the "automatically set-up home page" the plugin provides out of the box; a user who'd
+	 * rather land on their usual note can turn it off in Settings.
+	 */
+	openHomeOnStartup: boolean;
+	/**
+	 * In addition to `openHomeOnStartup`, also opens the StoneSync home view whenever the
+	 * workspace ends up with no file open at all (e.g. the last open note gets closed). Defaults
+	 * to `false`: unlike the once-per-startup case, this can fire repeatedly during a session, so
+	 * it stays opt-in rather than surprising a user who deliberately closes everything.
+	 */
+	openHomeWhenNoFileOpen: boolean;
 }
 
 export interface MirroredNote {
@@ -59,6 +73,8 @@ export const DEFAULT_SETTINGS: StoneSyncSettings = {
 	displayName: "",
 	mirrorFolder: "_shared",
 	mirrors: {},
+	openHomeOnStartup: true,
+	openHomeWhenNoFileOpen: false,
 };
 
 /** Derives the matching WebSocket base URL from the (https/http) server URL. */

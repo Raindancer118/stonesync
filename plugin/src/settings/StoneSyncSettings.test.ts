@@ -49,6 +49,8 @@ describe("isConfigured", () => {
 				displayName: "Tester",
 				mirrorFolder: "_shared",
 				mirrors: {},
+				openHomeOnStartup: true,
+				openHomeWhenNoFileOpen: false,
 			})
 		).toBe(true);
 	});
@@ -63,6 +65,8 @@ describe("isConfigured", () => {
 				displayName: "Tester",
 				mirrorFolder: "_shared",
 				mirrors: {},
+				openHomeOnStartup: true,
+				openHomeWhenNoFileOpen: false,
 			})
 		).toBe(false);
 	});

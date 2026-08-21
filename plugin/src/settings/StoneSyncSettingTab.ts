@@ -105,6 +105,32 @@ export class StoneSyncSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Open StoneSync home on startup")
+			.setDesc(
+				"Automatically opens the StoneSync home tab (branded search over this vault's " +
+					"server-side index) once after Obsidian starts."
+			)
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.openHomeOnStartup).onChange(async (value) => {
+					this.plugin.settings.openHomeOnStartup = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Open StoneSync home when no file is open")
+			.setDesc(
+				"Also opens the StoneSync home tab whenever the workspace ends up with no note " +
+					"open (e.g. after closing the last one) - not just once at startup."
+			)
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.openHomeWhenNoFileOpen).onChange(async (value) => {
+					this.plugin.settings.openHomeWhenNoFileOpen = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
 			.setName("Vault link namespace")
 			.setDesc(
 				"Lets other vaults link into this one as [[namespace:Note]]. Lowercase letters, " +

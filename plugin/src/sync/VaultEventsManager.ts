@@ -271,20 +271,17 @@ export class VaultEventsManager {
 		const file = this.app.vault.getAbstractFileByPath(path);
 		if (!file) return; // our own action, already gone (or never existed here)
 
-		// A collaborator's deletion is jarring and, worse, silently destructive if the user is
-		// mid-edit - keep the file and just tell them, rather than deleting content out from
-		// under an open editor (found via agy architecture review).
-		if (this.app.workspace.getActiveFile()?.path === path) {
-			new Notice(
-				`StoneSync: A collaborator deleted "${path}", but it's kept since you have it open. ` +
-					"Close it and delete manually if you agree it should go."
-			);
-			return;
-		}
+		const wasOpen = this.app.workspace.getActiveFile()?.path === path;
 
 		// Obsidian's trash (not a hard filesystem delete) so an unlucky race with the user's own
-		// concurrent action is recoverable from Obsidian's own trash, not just gone.
+		// concurrent action is recoverable from Obsidian's own trash, not just gone. Removed even
+		// if the file is open right now - a collaborator's delete wins, no "kept because open"
+		// exception (explicit product decision: a deleted file must not silently survive locally).
 		await this.app.vault.trash(file, true);
-		new Notice(`StoneSync: "${path}" ${reason}.`);
+		new Notice(
+			wasOpen
+				? `StoneSync: "${path}" ${reason} and was open in your editor - it has been closed.`
+				: `StoneSync: "${path}" ${reason}.`
+		);
 	}
 }

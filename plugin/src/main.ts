@@ -21,6 +21,10 @@ import { CrossVaultLinkRenderer } from "./links/CrossVaultLinkRenderer";
 import { findCrossVaultLinks, parseCrossVaultLink } from "./links/crossVaultLinks";
 import { exchangeCode } from "./onboarding/ApiKeyExchangeClient";
 import { pickUserColor } from "./settings/userColor";
+import { StoneSyncHomeView, STONESYNC_HOME_VIEW_TYPE } from "./search/StoneSyncHomeView";
+import { StoneSyncQuickSearchModal } from "./search/StoneSyncQuickSearchModal";
+import { SyncQueueModal } from "./ui/SyncQueueModal";
+import { isConfigured } from "./settings/StoneSyncSettings";
 
 /** `app.setting` is Obsidian's internal settings-panel API - stable in practice, but not part of the public typings. */
 interface AppWithSettings {
@@ -115,6 +119,8 @@ export default class StoneSyncPlugin extends Plugin {
 
 		this.addSettingTab(new StoneSyncSettingTab(this.app, this));
 
+		this.registerView(STONESYNC_HOME_VIEW_TYPE, (leaf) => new StoneSyncHomeView(leaf, () => this.settings));
+
 		// Status bar indicator for the currently-active file's live sync connection, and a
 		// one-click menu for the commands that would otherwise only be reachable via the
 		// command palette (Sync now, bulk download/upload).
@@ -140,7 +146,7 @@ export default class StoneSyncPlugin extends Plugin {
 			id: "stonesync-sync-now",
 			name: "Sync now",
 			callback: () => {
-				void this.syncManager?.syncNow();
+				void this.fullSyncNow();
 			},
 		});
 
@@ -186,6 +192,33 @@ export default class StoneSyncPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: "stonesync-quick-search",
+			name: "Quick search (server-side, typo-tolerant)",
+			callback: () => {
+				if (!isConfigured(this.settings)) {
+					new Notice("StoneSync: Please set server URL, API key and vault ID in settings first.");
+					return;
+				}
+				new StoneSyncQuickSearchModal(this.app, () => this.settings).open();
+			},
+		});
+
+		this.addCommand({
+			id: "stonesync-open-home",
+			name: "Open StoneSync home",
+			callback: () => void this.openHomeView(),
+		});
+
+		this.addCommand({
+			id: "stonesync-show-sync-queue",
+			name: "Show sync queue",
+			callback: () => {
+				if (!this.vaultEventsManager) return;
+				new SyncQueueModal(this.app, this.vaultEventsManager, () => this.settings).open();
+			},
+		});
+
 		// Right-click on a note or folder (file explorer, tab header, search results): manage who
 		// may see and change exactly that path, plus its history.
 		this.registerEvent(
@@ -198,8 +231,21 @@ export default class StoneSyncPlugin extends Plugin {
 		);
 
 		this.registerEvent(
-			this.app.workspace.on("active-leaf-change", () => {
+			this.app.workspace.on("active-leaf-change", (leaf) => {
 				void this.syncManager?.onActiveLeafChange();
+
+				// Opt-in companion to `openHomeOnStartup` - lands on the home view again whenever
+				// the workspace has no file open (e.g. the last note got closed), not just once at
+				// startup. `openHomeView` reuses an existing home leaf, so this is idempotent when
+				// the home view is already what's showing.
+				if (
+					this.settings.openHomeWhenNoFileOpen &&
+					isConfigured(this.settings) &&
+					!this.app.workspace.getActiveFile() &&
+					leaf?.view.getViewType() !== STONESYNC_HOME_VIEW_TYPE
+				) {
+					void this.openHomeView();
+				}
 			})
 		);
 
@@ -235,6 +281,12 @@ export default class StoneSyncPlugin extends Plugin {
 		// initial binding, in case a Markdown file is already open when the plugin loads
 		this.app.workspace.onLayoutReady(() => {
 			void this.syncManager?.refreshPermissions().then(() => this.syncManager?.onActiveLeafChange());
+			// The "automatically set-up home page" - once per Obsidian start, not once per note
+			// switch, and only if Obsidian isn't already restoring a StoneSync home tab from the
+			// previous session's saved layout (openHomeView itself also reuses an existing one).
+			if (this.settings.openHomeOnStartup && isConfigured(this.settings)) {
+				void this.openHomeView();
+			}
 		});
 	}
 
@@ -243,6 +295,19 @@ export default class StoneSyncPlugin extends Plugin {
 		this.syncManager?.setPresenceListener(null);
 		this.syncManager?.teardownAll();
 		this.vaultEventsManager?.stop();
+		this.app.workspace.detachLeavesOfType(STONESYNC_HOME_VIEW_TYPE);
+	}
+
+	/** Reveals the existing StoneSync home tab if one is already open, otherwise opens a new one. */
+	private async openHomeView(): Promise<void> {
+		const existing = this.app.workspace.getLeavesOfType(STONESYNC_HOME_VIEW_TYPE)[0];
+		if (existing) {
+			this.app.workspace.revealLeaf(existing);
+			return;
+		}
+		const leaf = this.app.workspace.getLeaf("tab");
+		await leaf.setViewState({ type: STONESYNC_HOME_VIEW_TYPE, active: true });
+		this.app.workspace.revealLeaf(leaf);
 	}
 
 	private updateStatusBar(status: ConnectionStatus | null): void {
@@ -325,9 +390,37 @@ export default class StoneSyncPlugin extends Plugin {
 		const menu = new Menu();
 		menu.addItem((item) =>
 			item
+				.setTitle("Search (server-side, typo-tolerant)")
+				.setIcon("search")
+				.onClick(() => {
+					if (!isConfigured(this.settings)) {
+						new Notice("StoneSync: Please set server URL, API key and vault ID in settings first.");
+						return;
+					}
+					new StoneSyncQuickSearchModal(this.app, () => this.settings).open();
+				})
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Open StoneSync home")
+				.setIcon("gem")
+				.onClick(() => void this.openHomeView())
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Show sync queue")
+				.setIcon("list-checks")
+				.onClick(() => {
+					if (!this.vaultEventsManager) return;
+					new SyncQueueModal(this.app, this.vaultEventsManager, () => this.settings).open();
+				})
+		);
+		menu.addSeparator();
+		menu.addItem((item) =>
+			item
 				.setTitle("Sync now")
 				.setIcon("refresh-cw")
-				.onClick(() => void this.syncManager?.syncNow())
+				.onClick(() => void this.fullSyncNow())
 		);
 		menu.addItem((item) =>
 			item
@@ -492,6 +585,24 @@ export default class StoneSyncPlugin extends Plugin {
 		new Notice(`StoneSync: Connected as ${exchanged.displayName}. Sync is now active.`);
 		await this.syncManager?.onActiveLeafChange();
 		await this.downloadEntireVault();
+	}
+
+	/**
+	 * Manual trigger for the "StoneSync: Sync now" command - a full bidirectional sync, not just
+	 * (re)binding the currently active editor. Pulls whatever the server has that this device is
+	 * missing, then pushes whatever this device has that the server is missing; both directions
+	 * are additive-only (see `downloadEntireVault`/`uploadEntireVault`), so running this repeatedly
+	 * is always safe.
+	 */
+	async fullSyncNow(): Promise<void> {
+		if (!this.settings.serverUrl || !this.settings.apiKey || !this.settings.vaultId) {
+			new Notice("StoneSync: Please set server URL, API key and vault ID in settings first.");
+			return;
+		}
+		await this.syncManager?.syncNow();
+		await this.downloadEntireVault();
+		await this.uploadEntireVault();
+		new Notice("StoneSync: Full sync complete.");
 	}
 
 	/** Manual trigger for the "StoneSync: Download entire vault from server" command. */
