@@ -1,5 +1,6 @@
 package de.tstieh.stonesync.sync;
 
+import de.tstieh.stonesync.search.DocumentSearchService;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.http.ResponseEntity;
@@ -37,16 +38,36 @@ public class DocumentController {
      */
     public static final String SESSION_HEADER = "X-StoneSync-Session";
 
-    private final DocumentService documentService;
+    private static final int MAX_SEARCH_RESULTS = 20;
 
-    public DocumentController(DocumentService documentService) {
+    private final DocumentService documentService;
+    private final DocumentSearchService searchService;
+
+    public DocumentController(DocumentService documentService, DocumentSearchService searchService) {
         this.documentService = documentService;
+        this.searchService = searchService;
     }
 
     @GetMapping
     public List<DocumentService.DocumentSummary> list(@RequestParam UUID vaultId, Authentication authentication) {
         UUID userId = (UUID) authentication.getPrincipal();
         return documentService.listDocuments(userId, vaultId);
+    }
+
+    /**
+     * JSON counterpart to the HTML search results at {@code /dashboard/vaults/{id}/search} - same
+     * {@link DocumentSearchService} (same GIN-indexed Postgres full-text search, same per-path
+     * access filtering), but Bearer-API-key-authenticated like every other {@code /api/**}
+     * endpoint, for the plugin's own in-Obsidian search (quick-search modal and the home view) to
+     * call directly instead of screen-scraping the dashboard's HTML.
+     */
+    @GetMapping("/search")
+    public List<SearchHitResponse> search(@RequestParam UUID vaultId, @RequestParam(defaultValue = "") String q,
+                                           Authentication authentication) {
+        UUID userId = (UUID) authentication.getPrincipal();
+        return searchService.search(userId, vaultId, q, MAX_SEARCH_RESULTS).stream()
+                .map(hit -> new SearchHitResponse(hit.id(), hit.path(), hit.contentType(), hit.snippetHtml()))
+                .toList();
     }
 
     @PostMapping("/resolve")
@@ -89,5 +110,8 @@ public class DocumentController {
     }
 
     public record ResolveResponse(UUID documentId) {
+    }
+
+    public record SearchHitResponse(UUID id, String path, DocumentEntity.ContentType contentType, String snippetHtml) {
     }
 }

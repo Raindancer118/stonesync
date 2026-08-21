@@ -15,10 +15,17 @@ public interface DocumentRepository extends JpaRepository<DocumentEntity, UUID> 
     Optional<DocumentEntity> findByVaultIdAndCurrentPath(UUID vaultId, String currentPath);
 
     /**
-     * Ranked full-text search within one vault (see migration V7's {@code search_vector}/GIN
-     * index). {@code websearch_to_tsquery} is used deliberately over {@code to_tsquery}: it never
-     * throws on arbitrary free-text user input (quotes, "-", stray punctuation), which
-     * {@code to_tsquery}'s boolean-operator syntax would.
+     * Ranked, typo-tolerant search within one vault: exact/stemmed full-text search (migration
+     * V7's {@code search_vector}/GIN index, {@code websearch_to_tsquery} - used deliberately over
+     * {@code to_tsquery}, since it never throws on arbitrary free-text input like quotes or stray
+     * punctuation) OR'd together with pg_trgm fuzzy matching (migration V8) so a typo or a partial
+     * word - exactly what's typed so far in a live/tab-complete search box - still finds things:
+     * {@code similarity()} against the note title ({@code current_path}, short enough that
+     * whole-string similarity is meaningful) and {@code word_similarity()} against the note/
+     * attachment plaintext ({@code word_similarity} rather than plain {@code similarity}, because
+     * the query is short and {@code plain_text} can be a whole document - plain {@code similarity}
+     * would dilute a real match to near-zero by comparing against the *entire* text's trigram set
+     * instead of just the best-matching substring within it).
      *
      * <p>Returns raw {@code Object[]} rows (id, current_path, content_type, snippet) rather than
      * an interface projection - deliberately, since the reliability of Spring Data's
@@ -36,8 +43,17 @@ public interface DocumentRepository extends JpaRepository<DocumentEntity, UUID> 
             FROM documents d
             WHERE d.vault_id = :vaultId
               AND d.deleted_at IS NULL
-              AND d.search_vector @@ websearch_to_tsquery('english', :query)
-            ORDER BY ts_rank(d.search_vector, websearch_to_tsquery('english', :query)) DESC
+              AND (
+                    d.search_vector @@ websearch_to_tsquery('english', :query)
+                    OR similarity(d.current_path, :query) > 0.3
+                    OR word_similarity(:query, coalesce(d.plain_text, '')) > 0.3
+                  )
+            ORDER BY
+              GREATEST(
+                ts_rank(d.search_vector, websearch_to_tsquery('english', :query)),
+                similarity(d.current_path, :query),
+                word_similarity(:query, coalesce(d.plain_text, ''))
+              ) DESC
             LIMIT :limit
             """, nativeQuery = true)
     List<Object[]> searchRaw(@Param("vaultId") UUID vaultId, @Param("query") String query,
