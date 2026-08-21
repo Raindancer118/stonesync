@@ -55,7 +55,9 @@ export class SyncManager {
 		private readonly app: App,
 		private getSettings: () => StoneSyncSettings,
 		/** Notes mirrored from other vaults bind to their own document, not to a path in this vault. */
-		private readonly mirrors: MirrorRegistry | null = null
+		private readonly mirrors: MirrorRegistry | null = null,
+		/** Persists `settings.pendingDeletePaths` after it changes - see {@link queuePendingDelete}. */
+		private readonly persistPendingDeletes: (paths: string[]) => Promise<void> = async () => {}
 	) {}
 
 	/**
@@ -490,15 +492,61 @@ export class SyncManager {
 		this.refreshActiveIndicators();
 
 		try {
-			const documentId = await resolveDeleteDocumentId(this.resolver, path);
-			if (documentId) {
-				await deleteDocument(settings.serverUrl, settings.apiKey, documentId);
-			}
+			await this.deleteOnServer(path);
 		} catch (error) {
-			console.error("[StoneSync] Failed to notify server of local delete", path, error);
-			new Notice(`StoneSync: Failed to sync deletion of "${path}" - it may reappear.`);
+			// Real gap found live: deleting while offline used to just fail silently forever -
+			// the server never learned about it, not even once connectivity came back. Queued by
+			// PATH rather than by a resolved id: for a file that was never opened locally (see
+			// resolveDeleteDocumentId), there may be no id to remember at all while offline -
+			// resolving it is itself a network call that only succeeds once reconnected.
+			console.error("[StoneSync] Failed to notify server of local delete - queued for retry", path, error);
+			await this.queuePendingDelete(path);
+			new Notice(`StoneSync: Couldn't reach the server to sync deleting "${path}" - will retry automatically once back online.`);
 		} finally {
 			this.resolver?.forget(path);
+		}
+	}
+
+	private async deleteOnServer(path: string): Promise<void> {
+		const settings = this.getSettings();
+		const documentId = await resolveDeleteDocumentId(this.resolver, path);
+		if (documentId) {
+			await deleteDocument(settings.serverUrl, settings.apiKey, documentId);
+		}
+	}
+
+	private async queuePendingDelete(path: string): Promise<void> {
+		const pending = new Set(this.getSettings().pendingDeletePaths ?? []);
+		pending.add(path);
+		await this.persistPendingDeletes([...pending]);
+	}
+
+	/**
+	 * Retries every delete that couldn't be sent to the server earlier (offline at the time) -
+	 * called once per successful (re)connect, and deliberately BEFORE any reconciliation download
+	 * pass: reconciliation only knows "is this path missing locally", so if a queued delete were
+	 * flushed after (or not at all), reconciliation would see the server still listing the
+	 * document and re-download the very file this is trying to delete.
+	 */
+	async flushPendingDeletes(): Promise<void> {
+		const pending = this.getSettings().pendingDeletePaths ?? [];
+		if (pending.length === 0) return;
+
+		const stillPending: string[] = [];
+		for (const path of pending) {
+			try {
+				await this.deleteOnServer(path);
+				this.resolver?.forget(path);
+			} catch (error) {
+				console.error("[StoneSync] Still could not sync a queued delete", path, error);
+				stillPending.push(path);
+			}
+		}
+
+		await this.persistPendingDeletes(stillPending);
+		const flushed = pending.length - stillPending.length;
+		if (flushed > 0) {
+			new Notice(`StoneSync: Synced ${flushed} deletion${flushed === 1 ? "" : "s"} that happened while offline.`);
 		}
 	}
 

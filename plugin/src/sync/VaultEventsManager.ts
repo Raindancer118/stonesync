@@ -6,6 +6,7 @@ import { downloadTextDocument, downloadAttachmentDocument } from "./DocumentDown
 import { listDocuments } from "./DocumentListClient";
 import { toWebSocketBaseUrl, isConfigured, type StoneSyncSettings } from "../settings/StoneSyncSettings";
 import { pickUserColor } from "../settings/userColor";
+import { pathsRemovedSincePreviousSnapshot } from "./reconcileRemovals";
 
 /** Caps how many downloads run at once - a burst of many document_created events (e.g. a
  * colleague dragging a whole folder in) must not fire off hundreds of concurrent requests/Yjs
@@ -39,7 +40,17 @@ export class VaultEventsManager {
 		/** Re-reads permissions and rebinds open editors after the server reports a change. */
 		private readonly onAccessChanged: () => Promise<void> = async () => {},
 		/** Applies a queued cross-vault link repair to a note this client has open. */
-		private readonly onLinkRewrite: (documentId: string) => Promise<void> = async () => {}
+		private readonly onLinkRewrite: (documentId: string) => Promise<void> = async () => {},
+		/**
+		 * Retries any deletes that couldn't reach the server while offline - see
+		 * `SyncManager.flushPendingDeletes`. Awaited BEFORE reconciliation on every (re)connect:
+		 * a delete that's still only queued would otherwise still be listed by the server, and
+		 * reconciliation would re-download the very file being deleted.
+		 */
+		private readonly onReconnected: () => Promise<void> = async () => {},
+		/** Persists `settings.knownServerPaths` after a reconciliation pass - see
+		 * {@link reconcileMissingFiles}. */
+		private readonly persistKnownPaths: (paths: string[]) => Promise<void> = async () => {}
 	) {}
 
 	/** Read live on every call - see {@code SyncManager.currentUserName} for why. */
@@ -67,10 +78,12 @@ export class VaultEventsManager {
 				if (status === "connected") {
 					// Closes the "disconnect sync-hole": events that happened while this client
 					// was offline/reconnecting were never delivered and never will be, so every
-					// successful (re)connect reconciles by downloading whatever is missing
-					// locally. Deliberately additive-only (never removes local files), matching
-					// this project's existing bias against destructive auto-actions.
-					void this.reconcileMissingFiles();
+					// successful (re)connect reconciles: downloads whatever is missing locally,
+					// AND (see reconcileMissingFiles) removes local files a collaborator deleted
+					// server-side while this client was gone - flushing this client's own queued
+					// offline deletes first, so they don't win a race against reconciliation
+					// re-downloading the very file being deleted.
+					void this.onReconnected().then(() => this.reconcileMissingFiles());
 				}
 				if (status === "unauthorized" && !this.shownUnauthorizedNotice) {
 					this.shownUnauthorizedNotice = true;
@@ -90,10 +103,30 @@ export class VaultEventsManager {
 		this.pendingReactions.length = 0;
 	}
 
+	/**
+	 * Downloads whatever the server has that this client is missing, AND - the part that closes
+	 * the "I deleted 10 files while a colleague was offline and they never found out" gap -
+	 * removes local files the server no longer has, by comparing against a snapshot of what this
+	 * client last saw (`settings.knownServerPaths`).
+	 *
+	 * That snapshot, not "path exists locally but not in the current server list", is the basis
+	 * for removal: a path missing from the very first-ever server list this client sees could
+	 * just as easily be local content that was never uploaded yet (this is the plugin's own
+	 * pre-existing vault, about to be pushed with `uploadEntireVault`) as a real deletion - there
+	 * is no way to tell those apart without a prior snapshot to diff against. With no snapshot
+	 * yet (`knownServerPaths` is `undefined`), only additive reconciliation runs, same as before
+	 * this feature existed.
+	 */
 	private async reconcileMissingFiles(): Promise<void> {
 		const settings = this.getSettings();
 		try {
 			const documents = await listDocuments(settings.serverUrl, settings.apiKey, settings.vaultId);
+			const currentPaths = documents.map((document) => document.path);
+
+			for (const path of pathsRemovedSincePreviousSnapshot(settings.knownServerPaths, currentPaths)) {
+				this.enqueueTask(() => this.removeLocallyIfPresent(path, "was deleted while you were offline"));
+			}
+
 			for (const document of documents) {
 				this.enqueueTask(async () => {
 					const downloaderOptions = { app: this.app, settings, userName: this.currentUserName(), userColor: this.currentUserColor() };
@@ -104,6 +137,8 @@ export class VaultEventsManager {
 					}
 				});
 			}
+
+			await this.persistKnownPaths(currentPaths);
 		} catch (error) {
 			console.error("[StoneSync] Failed to reconcile vault state after (re)connect", error);
 		}
@@ -147,25 +182,7 @@ export class VaultEventsManager {
 			}
 			new Notice(`StoneSync: "${event.path}" was added by a collaborator.`);
 		} else if (event.type === "document_deleted") {
-			const file = this.app.vault.getAbstractFileByPath(event.path);
-			if (!file) return; // our own action, already gone
-
-			// A colleague deleting a file the user is actively looking at is jarring and, worse,
-			// silently destructive if they're mid-edit - keep the file and just tell them,
-			// rather than deleting content out from under an open editor (found via agy
-			// architecture review).
-			if (this.app.workspace.getActiveFile()?.path === event.path) {
-				new Notice(
-					`StoneSync: A collaborator deleted "${event.path}", but it's kept since you have it open. ` +
-						"Close it and delete manually if you agree it should go."
-				);
-				return;
-			}
-
-			// Obsidian's trash (not a hard filesystem delete) so an unlucky race with the user's
-			// own concurrent action is recoverable from Obsidian's own trash, not just gone.
-			await this.app.vault.trash(file, true);
-			new Notice(`StoneSync: "${event.path}" was deleted by a collaborator.`);
+			await this.removeLocallyIfPresent(event.path, "was deleted by a collaborator");
 		} else if (event.type === "link_rewrite") {
 			await this.onLinkRewrite(event.documentId);
 		} else if (event.type === "access_revoked") {
@@ -181,5 +198,31 @@ export class VaultEventsManager {
 				`StoneSync: You no longer have access to "${event.path}" - the local copy was moved to Obsidian's trash.`
 			);
 		}
+	}
+
+	/**
+	 * Shared by the live "document_deleted" event and the reconciliation-time removal pass
+	 * (see {@link reconcileMissingFiles}): removes a locally present file that the server no
+	 * longer has, unless the user has it open right now.
+	 */
+	private async removeLocallyIfPresent(path: string, reason: string): Promise<void> {
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (!file) return; // our own action, already gone (or never existed here)
+
+		// A collaborator's deletion is jarring and, worse, silently destructive if the user is
+		// mid-edit - keep the file and just tell them, rather than deleting content out from
+		// under an open editor (found via agy architecture review).
+		if (this.app.workspace.getActiveFile()?.path === path) {
+			new Notice(
+				`StoneSync: A collaborator deleted "${path}", but it's kept since you have it open. ` +
+					"Close it and delete manually if you agree it should go."
+			);
+			return;
+		}
+
+		// Obsidian's trash (not a hard filesystem delete) so an unlucky race with the user's own
+		// concurrent action is recoverable from Obsidian's own trash, not just gone.
+		await this.app.vault.trash(file, true);
+		new Notice(`StoneSync: "${path}" ${reason}.`);
 	}
 }

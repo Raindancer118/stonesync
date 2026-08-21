@@ -25,6 +25,22 @@ export interface StoneSyncSettings {
 	 * re-rolled on every restart), but changeable via the settings UI.
 	 */
 	displayName: string;
+	/**
+	 * Snapshot of every vault-relative path this client could see on the server as of the last
+	 * successful reconciliation. Compared against the current list on the next reconcile to spot
+	 * documents deleted (by anyone) while this client was disconnected - see
+	 * `VaultEventsManager.reconcileMissingFiles`. `undefined` until the first-ever successful
+	 * reconciliation: with no prior snapshot there is nothing safe to compare against (a path
+	 * missing from the very first list could just as easily be local content never synced yet).
+	 */
+	knownServerPaths?: string[];
+	/**
+	 * Vault-relative paths whose deletion couldn't be sent to the server yet (offline, or some
+	 * other transient failure) - retried automatically on the next successful connect, see
+	 * `SyncManager.flushPendingDeletes`. Without this, deleting a file while offline was silently
+	 * final only on this device: the server never learned about it at all, not even later.
+	 */
+	pendingDeletePaths?: string[];
 }
 
 export interface MirroredNote {

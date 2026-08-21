@@ -74,7 +74,11 @@ export default class StoneSyncPlugin extends Plugin {
 		// once here at onload() time, so a later name change never reached an already-running
 		// session).
 		this.mirrors = new MirrorRegistry(() => this.settings, () => this.saveData(this.settings));
-		this.syncManager = new SyncManager(this.app, () => this.settings, this.mirrors);
+		this.syncManager = new SyncManager(this.app, () => this.settings, this.mirrors,
+			async (paths) => {
+				this.settings.pendingDeletePaths = paths;
+				await this.saveData(this.settings);
+			});
 		this.linkOpener = new CrossVaultLinkOpener({
 			app: this.app,
 			getSettings: () => this.settings,
@@ -85,7 +89,12 @@ export default class StoneSyncPlugin extends Plugin {
 		});
 		this.vaultEventsManager = new VaultEventsManager(this.app, () => this.settings,
 			() => this.syncManager?.applyPermissionChange() ?? Promise.resolve(),
-			(documentId) => this.syncManager?.applyLinkRewriteEvent(documentId) ?? Promise.resolve());
+			(documentId) => this.syncManager?.applyLinkRewriteEvent(documentId) ?? Promise.resolve(),
+			() => this.syncManager?.flushPendingDeletes() ?? Promise.resolve(),
+			async (paths) => {
+				this.settings.knownServerPaths = paths;
+				await this.saveData(this.settings);
+			});
 		this.vaultEventsManager.start();
 
 		// Cross-vault links: Obsidian renders [[slug:Note]] as an unresolved link because the
