@@ -1,19 +1,13 @@
 package de.tstieh.stonesync.admin;
 
-import de.tstieh.stonesync.attachments.AttachmentRepository;
 import de.tstieh.stonesync.auth.ApiKeyEntity;
 import de.tstieh.stonesync.auth.ApiKeyHasher;
 import de.tstieh.stonesync.auth.ApiKeyRepository;
 import de.tstieh.stonesync.history.VaultGitRepository;
-import de.tstieh.stonesync.links.DocumentLinkRepository;
-import de.tstieh.stonesync.links.LinkRewriteRepository;
 import de.tstieh.stonesync.sync.DocumentDeletionBroadcaster;
 import de.tstieh.stonesync.sync.DocumentEntity;
 import de.tstieh.stonesync.sync.DocumentRepository;
-import de.tstieh.stonesync.sync.DocumentRestoreQueueRepository;
 import de.tstieh.stonesync.sync.VaultEventBroadcaster;
-import de.tstieh.stonesync.sync.YjsSnapshotRepository;
-import de.tstieh.stonesync.sync.YjsUpdateRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -50,18 +44,6 @@ class AdminServiceTest {
     @Mock
     private DocumentRepository documentRepository;
     @Mock
-    private YjsUpdateRepository yjsUpdateRepository;
-    @Mock
-    private YjsSnapshotRepository yjsSnapshotRepository;
-    @Mock
-    private AttachmentRepository attachmentRepository;
-    @Mock
-    private DocumentRestoreQueueRepository restoreQueueRepository;
-    @Mock
-    private DocumentLinkRepository documentLinkRepository;
-    @Mock
-    private LinkRewriteRepository linkRewriteRepository;
-    @Mock
     private VaultGitRepository gitRepository;
     @Mock
     private DocumentDeletionBroadcaster documentDeletionBroadcaster;
@@ -79,8 +61,7 @@ class AdminServiceTest {
     void setUp() {
         Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
         service = new AdminService(userRepository, vaultRepository, accessRepository, apiKeyRepository,
-                documentRepository, hasher, auditService, clock, yjsUpdateRepository, yjsSnapshotRepository,
-                attachmentRepository, restoreQueueRepository, documentLinkRepository, linkRewriteRepository,
+                documentRepository, hasher, auditService, clock,
                 gitRepository, documentDeletionBroadcaster, vaultEventBroadcaster);
     }
 
@@ -131,7 +112,8 @@ class AdminServiceTest {
     }
 
     @Test
-    @DisplayName("force-deleting a vault with documents hard-removes them, their git history, and the vault itself")
+    @DisplayName("force-deleting a vault with documents kicks connections, hard-removes the documents "
+            + "(their referencing rows cascade at the database level), erases its git history, and the vault itself")
     void forceDeleteVaultWithDocumentsRemovesEverything() {
         UUID vaultId = UUID.randomUUID();
         DocumentEntity document = new DocumentEntity(UUID.randomUUID(), vaultId, "note.md",
@@ -143,12 +125,6 @@ class AdminServiceTest {
 
         verify(documentDeletionBroadcaster).kickSessions(document.getId());
         verify(vaultEventBroadcaster).notifyVaultDeleted(vaultId);
-        verify(linkRewriteRepository).deleteByDocumentIdIn(documentIds);
-        verify(documentLinkRepository).deleteBySourceDocumentIdIn(documentIds);
-        verify(restoreQueueRepository).deleteAllByIdInBatch(documentIds);
-        verify(yjsUpdateRepository).deleteByDocumentIdIn(documentIds);
-        verify(attachmentRepository).deleteAllByIdInBatch(documentIds);
-        verify(yjsSnapshotRepository).deleteAllByIdInBatch(documentIds);
         verify(documentRepository).deleteAllByIdInBatch(documentIds);
         verify(gitRepository).deleteRepository(vaultId);
         verify(vaultRepository).deleteById(vaultId);

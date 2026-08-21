@@ -5,18 +5,12 @@ import de.tstieh.stonesync.audit.AuditService;
 import de.tstieh.stonesync.auth.ApiKeyEntity;
 import de.tstieh.stonesync.auth.ApiKeyHasher;
 import de.tstieh.stonesync.auth.ApiKeyRepository;
-import de.tstieh.stonesync.attachments.AttachmentRepository;
 import de.tstieh.stonesync.history.VaultGitRepository;
-import de.tstieh.stonesync.links.DocumentLinkRepository;
-import de.tstieh.stonesync.links.LinkRewriteRepository;
 import de.tstieh.stonesync.logging.AppLog;
 import de.tstieh.stonesync.sync.DocumentDeletionBroadcaster;
 import de.tstieh.stonesync.sync.DocumentEntity;
 import de.tstieh.stonesync.sync.DocumentRepository;
-import de.tstieh.stonesync.sync.DocumentRestoreQueueRepository;
 import de.tstieh.stonesync.sync.VaultEventBroadcaster;
-import de.tstieh.stonesync.sync.YjsSnapshotRepository;
-import de.tstieh.stonesync.sync.YjsUpdateRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,10 +23,11 @@ import java.util.UUID;
 /**
  * User/device/vault administration - create, list, delete, plus access-role assignment/revoke.
  *
- * <p>Deletes are deliberately guarded rather than cascading: a vault is only removable once
- * it has no documents left (see {@link VaultNotEmptyException}), and a user is only removable
- * once they own no vaults (see {@link UserOwnsVaultsException}) - both would otherwise risk
- * silently destroying synced content or orphaning a vault.</p>
+ * <p>By default, deletes are guarded rather than cascading: a vault is only removable once it
+ * has no documents left (see {@link VaultNotEmptyException}), and a user is only removable once
+ * they own no vaults (see {@link UserOwnsVaultsException}) - both would otherwise risk silently
+ * destroying synced content or orphaning a vault. {@link #deleteVault(UUID, boolean)}'s
+ * {@code force} path is the deliberate exception to that guard.</p>
  */
 @Service
 public class AdminService {
@@ -45,12 +40,6 @@ public class AdminService {
     private final ApiKeyHasher apiKeyHasher;
     private final AuditService auditService;
     private final Clock clock;
-    private final YjsUpdateRepository yjsUpdateRepository;
-    private final YjsSnapshotRepository yjsSnapshotRepository;
-    private final AttachmentRepository attachmentRepository;
-    private final DocumentRestoreQueueRepository restoreQueueRepository;
-    private final DocumentLinkRepository documentLinkRepository;
-    private final LinkRewriteRepository linkRewriteRepository;
     private final VaultGitRepository gitRepository;
     private final DocumentDeletionBroadcaster documentDeletionBroadcaster;
     private final VaultEventBroadcaster vaultEventBroadcaster;
@@ -58,10 +47,7 @@ public class AdminService {
     public AdminService(UserRepository userRepository, VaultRepository vaultRepository,
                          UserVaultAccessRepository accessRepository, ApiKeyRepository apiKeyRepository,
                          DocumentRepository documentRepository, ApiKeyHasher apiKeyHasher,
-                         AuditService auditService, Clock clock, YjsUpdateRepository yjsUpdateRepository,
-                         YjsSnapshotRepository yjsSnapshotRepository, AttachmentRepository attachmentRepository,
-                         DocumentRestoreQueueRepository restoreQueueRepository,
-                         DocumentLinkRepository documentLinkRepository, LinkRewriteRepository linkRewriteRepository,
+                         AuditService auditService, Clock clock,
                          VaultGitRepository gitRepository, DocumentDeletionBroadcaster documentDeletionBroadcaster,
                          VaultEventBroadcaster vaultEventBroadcaster) {
         this.userRepository = userRepository;
@@ -72,12 +58,6 @@ public class AdminService {
         this.apiKeyHasher = apiKeyHasher;
         this.auditService = auditService;
         this.clock = clock;
-        this.yjsUpdateRepository = yjsUpdateRepository;
-        this.yjsSnapshotRepository = yjsSnapshotRepository;
-        this.attachmentRepository = attachmentRepository;
-        this.restoreQueueRepository = restoreQueueRepository;
-        this.documentLinkRepository = documentLinkRepository;
-        this.linkRewriteRepository = linkRewriteRepository;
         this.gitRepository = gitRepository;
         this.documentDeletionBroadcaster = documentDeletionBroadcaster;
         this.vaultEventBroadcaster = vaultEventBroadcaster;
@@ -212,9 +192,11 @@ public class AdminService {
      *              delete a vault that still has document rows at all - including already
      *              soft-deleted ones, since {@code documentRepository.findByVaultId} is not
      *              filtered by {@code deleted_at}. When {@code true}, hard-deletes every document
-     *              row (and everything referencing them: Yjs updates/snapshots, attachments,
-     *              pending restores, cross-vault links, link rewrites) plus the vault's entire git
-     *              history repository, then the vault itself. Explicit product decision: an
+     *              row - cascading at the database level (see migration
+     *              {@code V9__cascade_document_deletes.sql}) to everything referencing them: Yjs
+     *              updates/snapshots, attachments, pending restores, cross-vault links, link
+     *              rewrites - plus the vault's entire git history repository, then the vault
+     *              itself. Explicit product decision: an
      *              operator who reaches for {@code --force} has already decided the content
      *              doesn't matter (e.g. a soft-deleted-everything test vault) - this is not
      *              guarded further.
@@ -237,21 +219,21 @@ public class AdminService {
             List<UUID> documentIds = documents.stream().map(DocumentEntity::getId).toList();
 
             // Kick every connected client BEFORE touching a single row: a still-connected client
-            // sending a real edit for one of these documents mid-delete can otherwise insert a
-            // fresh yjs_updates row after that document's own rows were already wiped, failing
-            // the final documents-table delete's foreign key check. Explicit product decision:
-            // we don't wait for or care about whatever was in flight - notify, disconnect, then
-            // delete. `notifyVaultDeleted` tells every vault-events session "vault_deleted" before
-            // closing it, which is the "whoops, your vault is gone" the client surfaces.
+            // sending a real edit for one of these documents right as we delete it could otherwise
+            // still land after the fact. We don't wait for or care what was in flight - notify,
+            // disconnect, then delete. `notifyVaultDeleted` tells every vault-events session
+            // "vault_deleted" before closing it, which is the "whoops, your vault is gone" the
+            // client surfaces.
             documentIds.forEach(documentDeletionBroadcaster::kickSessions);
             vaultEventBroadcaster.notifyVaultDeleted(vaultId);
 
-            linkRewriteRepository.deleteByDocumentIdIn(documentIds);
-            documentLinkRepository.deleteBySourceDocumentIdIn(documentIds);
-            restoreQueueRepository.deleteAllByIdInBatch(documentIds);
-            yjsUpdateRepository.deleteByDocumentIdIn(documentIds);
-            attachmentRepository.deleteAllByIdInBatch(documentIds);
-            yjsSnapshotRepository.deleteAllByIdInBatch(documentIds);
+            // A single cascading delete (see migration V9__cascade_document_deletes.sql), not one
+            // pre-delete per referencing table: an app-level, multiple-statements-in-a-fixed-order
+            // approach turned out to NOT be race-free in production - a still-connected client's
+            // live edit landing between an early pre-delete and this statement re-inserted a row
+            // that this statement's own foreign key check then tripped over. One atomic DELETE has
+            // no such window; anything a client sends after this point simply fails its own insert
+            // against an already-gone parent document, on that write's own request, not this one.
             documentRepository.deleteAllByIdInBatch(documentIds);
             gitRepository.deleteRepository(vaultId);
             AppLog.warn("Force-deleted vault {} - hard-removed {} document row(s) and its git history", vaultId, documentIds.size());
