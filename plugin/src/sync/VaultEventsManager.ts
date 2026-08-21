@@ -6,7 +6,7 @@ import { downloadTextDocument, downloadAttachmentDocument } from "./DocumentDown
 import { listDocuments } from "./DocumentListClient";
 import { toWebSocketBaseUrl, isConfigured, type StoneSyncSettings } from "../settings/StoneSyncSettings";
 import { pickUserColor } from "../settings/userColor";
-import { pathsRemovedSincePreviousSnapshot, isPlausibleRemovalCount } from "./reconcileRemovals";
+import { pathsRemovedSincePreviousSnapshot } from "./reconcileRemovals";
 import { labelForEvent } from "./syncQueueLabels";
 
 /** Caps how many downloads run at once - a burst of many document_created events (e.g. a
@@ -162,30 +162,11 @@ export class VaultEventsManager {
 			const previouslyKnown = settings.knownServerPaths;
 			const removed = pathsRemovedSincePreviousSnapshot(previouslyKnown, currentPaths);
 
-			// Circuit breaker - see isPlausibleRemovalCount's doc comment: a transiently
-			// incomplete server response must never cascade into mass-deleting real files. If
-			// this trips, skip BOTH the removal pass and updating the snapshot below - retrying
-			// with the last known-good snapshot on the next successful connect is what recovers,
-			// rather than a wrong short list poisoning every future comparison too.
-			if (!isPlausibleRemovalCount(previouslyKnown?.length ?? 0, removed.length)) {
-				console.error(
-					"[StoneSync] Reconciliation refused to remove", removed.length, "of",
-					previouslyKnown?.length, "previously known files - the server's document list " +
-					"looked implausibly short (a transient issue, not a real mass delete). Skipping " +
-					"this reconcile's removal pass entirely."
-				);
-				new Notice(
-					"StoneSync: Skipped a suspicious sync reconciliation that would have removed " +
-						"an implausibly large number of local files - please check your connection " +
-						"and try syncing again."
-				);
-			} else {
-				for (const path of removed) {
-					this.enqueueTask(`Removing "${path}" (deleted while offline)`,
-						() => this.removeLocallyIfPresent(path, "was deleted while you were offline"));
-				}
-				await this.persistKnownPaths(currentPaths);
+			for (const path of removed) {
+				this.enqueueTask(`Removing "${path}" (deleted while offline)`,
+					() => this.removeLocallyIfPresent(path, "was deleted while you were offline"));
 			}
+			await this.persistKnownPaths(currentPaths);
 
 			for (const document of documents) {
 				this.enqueueTask(`Checking "${document.path}"`, async () => {
