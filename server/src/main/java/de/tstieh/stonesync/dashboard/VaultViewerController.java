@@ -86,12 +86,12 @@ public class VaultViewerController {
         }
 
         writePage(response, vaultName + " - StoneSync", vaultId, vaultName, """
+                %s
                 <section>
                   <div class="label">%s</div>
-                  %s
                   <div class="panel" style="padding:.5rem 1rem;">%s</div>
                 </section>
-                """.formatted(HtmlEscaper.escape(vaultName), renderSearchForm(vaultId, ""), rows));
+                """.formatted(renderHeroSearch(vaultId, ""), HtmlEscaper.escape(vaultName), rows));
     }
 
     @GetMapping("/search")
@@ -118,7 +118,7 @@ public class VaultViewerController {
                   %s
                   %s
                 </section>
-                """.formatted(HtmlEscaper.escape(vaultName), renderSearchForm(vaultId, q), results));
+                """.formatted(HtmlEscaper.escape(vaultName), renderCompactSearch(vaultId, q), results));
     }
 
     @GetMapping("/notes/{documentId}")
@@ -191,7 +191,27 @@ public class VaultViewerController {
                 """.formatted(href, HtmlEscaper.escape(hit.path()), hit.snippetHtml());
     }
 
-    private String renderSearchForm(UUID vaultId, String currentQuery) {
+    /**
+     * The big, centered, Google-homepage-style search bar every vault page opens with - search
+     * is the actual point of this surface, so it gets the most prominent spot on screen rather
+     * than a small form buried under a heading.
+     */
+    private String renderHeroSearch(UUID vaultId, String currentQuery) {
+        return """
+                <div class="hero-search">
+                  <div class="wordmark"><em>Stone</em>Sync</div>
+                  <form method="get" action="/dashboard/vaults/%s/search">
+                    <input type="text" name="q" value="%s" placeholder="Search notes, PDFs, screenshots…" required/>
+                    <button type="submit" class="icon-btn" aria-label="Search">&#8981;</button>
+                  </form>
+                  <div class="hint">Searches every note and attachment in this vault, OCR included.</div>
+                </div>
+                """.formatted(vaultId, HtmlEscaper.escape(currentQuery));
+    }
+
+    /** A small, non-hero re-search box atop the results themselves - once you've already
+     * searched, the results are the point, not another full-screen search moment. */
+    private String renderCompactSearch(UUID vaultId, String currentQuery) {
         return """
                 <form method="get" action="/dashboard/vaults/%s/search" class="search-box">
                   <input type="text" name="q" value="%s" placeholder="Search this vault..." required/>

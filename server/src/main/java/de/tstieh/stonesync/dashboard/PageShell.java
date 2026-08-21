@@ -47,9 +47,34 @@ public final class PageShell {
             .rail a:hover{background:var(--surface-raised); color:var(--text); text-decoration:none;}
             .rail .crumb{color:var(--text-muted); font-size:.78rem; margin:1.25rem 0 .25rem; text-transform:uppercase; letter-spacing:.08em;}
 
-            main{flex:1; padding:2.5rem 3rem; max-width:52rem;}
+            .shell{justify-content:center;}
+            main{flex:1 1 auto; padding:2.5rem 3rem 4rem; max-width:44rem; margin:0 auto;}
             section{margin-bottom:3.5rem;}
             section > .label{color:var(--text-muted); font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; margin-bottom:.75rem;}
+
+            .hero-search{
+              text-align:center; margin-bottom:2.5rem;
+              min-height:min(70vh, 34rem); display:flex; flex-direction:column; align-items:center;
+              justify-content:center;
+            }
+            .hero-search .wordmark{font-family:"Fraunces",serif; font-size:3rem; font-weight:600; margin-bottom:2rem;}
+            .hero-search .wordmark em{color:var(--accent); font-style:normal;}
+            .hero-search form{
+              display:flex; align-items:center; gap:.6rem; background:var(--surface-raised);
+              border:1px solid var(--stroke); border-radius:999px; padding:.6rem .6rem .6rem 2rem;
+              box-shadow:0 16px 44px -16px rgba(0,0,0,.6); transition:border-color .15s, box-shadow .15s;
+              width:100%; max-width:40rem; margin:0 auto;
+            }
+            .hero-search form:focus-within{border-color:var(--accent); box-shadow:0 0 0 4px rgba(155,127,196,.22), 0 16px 44px -16px rgba(0,0,0,.6);}
+            .hero-search input{flex:1; background:none; border:none; padding:1rem .2rem; font-size:1.3rem; color:var(--text);}
+            .hero-search input:focus{outline:none;}
+            .hero-search .icon-btn{
+              display:flex; align-items:center; justify-content:center; width:3.4rem; height:3.4rem;
+              border-radius:999px; background:var(--accent); color:var(--bg); border:none; cursor:pointer;
+              flex:0 0 auto; font-size:1.4rem; transition:background-color .15s;
+            }
+            .hero-search .icon-btn:hover{background:var(--accent-strong);}
+            .hero-search .hint{color:var(--text-muted); font-size:.88rem; margin-top:1.1rem;}
 
             .panel{background:var(--surface); border:1px solid var(--stroke); padding:1.25rem 1.5rem; border-radius:16px;}
 
