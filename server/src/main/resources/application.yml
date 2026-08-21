@@ -23,6 +23,14 @@ server:
   # gets the whole login flow rejected with 400 (found via a real invite-link test
   # against the live server after Phase 3 deploy).
   forward-headers-strategy: framework
+  servlet:
+    session:
+      # Default (30m) is too short for someone who clicks an invite link without Obsidian and
+      # the StoneSync plugin installed yet - they land on the "Connect now" page but need real
+      # time to download/install both before that HttpSession-backed page still works. Only
+      # affects the browser-session-cookie login flow (invite onboarding, the dashboard); every
+      # other endpoint is stateless Bearer API-key auth and unaffected.
+      timeout: 2h
 
 stonesync:
   ticket:

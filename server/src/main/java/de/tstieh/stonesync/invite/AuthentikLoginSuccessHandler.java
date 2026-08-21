@@ -17,15 +17,15 @@ import java.io.IOException;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
  * Runs once, right after a colleague successfully logs into Authentik via the invite flow (see
  * {@link AuthentikLoginController}): redeems the invite token stashed in the session, finds or
- * creates the corresponding StoneSync user by their verified email, grants the invite's role on
- * its vault, mints a fresh device API key, and hands back a small HTML page whose one link is
- * an {@code obsidian://} deep link carrying everything the plugin needs to auto-configure
- * itself - no manual copy-pasting of server URL/API key/vault ID.
+ * creates the corresponding StoneSync user by their verified email, and grants the invite's role
+ * on its vault. Deliberately does NOT mint the device API key / deep link yet - see
+ * {@link AuthentikLoginController#connectNow} for why that's a separate "I'm ready" step - it just
+ * stashes the (non-secret) userId/vaultId/displayName in the session and shows install
+ * instructions plus a "Connect now" link.
  *
  * <p>A login with no pending invite token in the session (i.e. one that didn't start at
  * {@link AuthentikLoginController#startInviteLogin}) is a regular dashboard login instead - see
@@ -37,20 +37,15 @@ public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandle
     private final InviteService inviteService;
     private final UserRepository userRepository;
     private final AdminService adminService;
-    private final ApiKeyExchangeService exchangeService;
     private final ApiKeyHasher apiKeyHasher;
-    private final PublicUrlProperties publicUrlProperties;
     private final SecureRandom random = new SecureRandom();
 
     public AuthentikLoginSuccessHandler(InviteService inviteService, UserRepository userRepository,
-                                         AdminService adminService, ApiKeyExchangeService exchangeService,
-                                         ApiKeyHasher apiKeyHasher, PublicUrlProperties publicUrlProperties) {
+                                         AdminService adminService, ApiKeyHasher apiKeyHasher) {
         this.inviteService = inviteService;
         this.userRepository = userRepository;
         this.adminService = adminService;
-        this.exchangeService = exchangeService;
         this.apiKeyHasher = apiKeyHasher;
-        this.publicUrlProperties = publicUrlProperties;
     }
 
     @Override
@@ -93,12 +88,13 @@ public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandle
         AppLog.info("Invite onboarding for {}: {} user {}", email, existingUser.isPresent() ? "existing" : "new", user.getId());
 
         adminService.grantAccess(user.getId(), redeemed.vaultId(), redeemed.role());
-        String rawApiKey = adminService.createApiKey(user.getId(), "invite-" + UUID.randomUUID());
-        String exchangeCode = exchangeService.create(rawApiKey, redeemed.vaultId(), displayName);
 
-        String deepLink = DeepLinkBuilder.build(publicUrlProperties.requireUrl(), exchangeCode);
-        AppLog.info("Invite onboarding complete for {} - handing back connect deep link", email);
-        writeSuccessPage(response, deepLink, displayName);
+        session.setAttribute(AuthentikLoginController.SESSION_KEY_READY_USER_ID, user.getId());
+        session.setAttribute(AuthentikLoginController.SESSION_KEY_READY_VAULT_ID, redeemed.vaultId());
+        session.setAttribute(AuthentikLoginController.SESSION_KEY_READY_DISPLAY_NAME, displayName);
+
+        AppLog.info("Invite onboarding complete for {} - showing install instructions", email);
+        writeGetReadyPage(response, displayName);
     }
 
     /**
@@ -113,19 +109,40 @@ public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandle
         return apiKeyHasher.hash(Base64.getEncoder().encodeToString(bytes));
     }
 
-    private void writeSuccessPage(HttpServletResponse response, String deepLink, String displayName) throws IOException {
+    private void writeGetReadyPage(HttpServletResponse response, String displayName) throws IOException {
         response.setStatus(HttpServletResponse.SC_OK);
         response.setContentType("text/html;charset=UTF-8");
         response.getWriter().write("""
                 <!doctype html>
-                <html><head><meta charset="utf-8"><title>StoneSync - You're in!</title></head>
-                <body style="font-family: sans-serif; max-width: 40em; margin: 4em auto; text-align: center;">
+                <html><head><meta charset="utf-8"><title>StoneSync - Almost there</title></head>
+                <body style="font-family: sans-serif; max-width: 40em; margin: 4em auto; padding: 0 1em;">
                 <h1>Welcome, %s!</h1>
-                <p>Click below to open Obsidian - StoneSync will configure itself and download the vault automatically.</p>
-                <p><a href="%s" style="display:inline-block; padding: 0.8em 1.5em; background:#5865f2; color:white; text-decoration:none; border-radius:6px; font-size:1.1em;">Open in Obsidian</a></p>
-                <p style="color:#666; font-size:0.9em;">(Requires Obsidian and the StoneSync plugin to already be installed.)</p>
+                <p>You now have access to the vault. Before you connect, make sure you have:</p>
+                <ol>
+                  <li>
+                    <strong>Obsidian</strong> - if you don't have it yet, download it from
+                    <a href="https://obsidian.md/download">obsidian.md/download</a> and install it.
+                  </li>
+                  <li>
+                    <strong>The StoneSync plugin</strong> - it isn't in Obsidian's official Community
+                    Plugins store yet, so install it via <strong>BRAT</strong>:
+                    <ol>
+                      <li>In Obsidian: Settings &rarr; Community plugins &rarr; Browse &rarr; search for
+                        "BRAT" &rarr; install and enable it.</li>
+                      <li>Open BRAT's settings, click "Add Beta plugin", and paste
+                        <code>Raindancer118/stonesync</code>.</li>
+                      <li>Enable "StoneSync" in Community plugins once BRAT has added it.</li>
+                    </ol>
+                  </li>
+                </ol>
+                <p>Already have both? Click below - this is the step that actually connects you to the vault.</p>
+                <p><a href="/invite/connect" style="display:inline-block; padding: 0.8em 1.5em; background:#5865f2; color:white; text-decoration:none; border-radius:6px; font-size:1.1em;">Connect now</a></p>
+                <p style="color:#666; font-size:0.9em;">Not ready yet? No problem - leave this tab/browser open,
+                install everything, then click "Connect now" whenever you are. (If you close the browser and come
+                back much later and "Connect now" says your session expired, just ask whoever invited you for a
+                fresh invite link - this one has already been used to log you in.)</p>
                 </body></html>
-                """.formatted(HtmlEscaper.escape(displayName), deepLink));
+                """.formatted(HtmlEscaper.escape(displayName)));
     }
 
     private void writeErrorPage(HttpServletResponse response, String message) throws IOException {
@@ -140,5 +157,4 @@ public class AuthentikLoginSuccessHandler implements AuthenticationSuccessHandle
                 </body></html>
                 """.formatted(message));
     }
-
 }
