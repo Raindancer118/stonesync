@@ -3,6 +3,7 @@ import type { EditorView } from "@codemirror/view";
 import { DocumentSession } from "./DocumentSession";
 import { DocumentIdResolver } from "./DocumentIdResolver";
 import { deleteDocument } from "./DocumentDeleteClient";
+import { resolveDeleteDocumentId } from "./resolveDeleteDocumentId";
 import { syncCompartment, buildCollabExtension, emptyExtension } from "../editor/syncExtension";
 import { decideReconciliation } from "./reconcile";
 import { PermissionsClient } from "../access/PermissionsClient";
@@ -12,6 +13,7 @@ import type { MirrorRegistry } from "../links/MirrorRegistry";
 import { canWrite, canRead, effectiveLevel, UNKNOWN_PERMISSIONS, type AccessLevel, type VaultPermissions } from "../access/permissions";
 import type { StoneSyncSettings } from "../settings/StoneSyncSettings";
 import { isConfigured } from "../settings/StoneSyncSettings";
+import { pickUserColor } from "../settings/userColor";
 import type { ConnectionStatus } from "../net/StoneSyncSocket";
 
 /** Obsidian exposes the underlying CM6 EditorView as `editor.cm` (unofficial but stable API). */
@@ -51,11 +53,22 @@ export class SyncManager {
 	constructor(
 		private readonly app: App,
 		private getSettings: () => StoneSyncSettings,
-		private readonly userName: string,
-		private readonly userColor: string,
 		/** Notes mirrored from other vaults bind to their own document, not to a path in this vault. */
 		private readonly mirrors: MirrorRegistry | null = null
 	) {}
+
+	/**
+	 * Read live from settings on every call, not captured once at construction time - this
+	 * instance lives for the whole plugin session, so a later change to the display name in
+	 * Settings must take effect on the very next sync action, not only after Obsidian restarts.
+	 */
+	private currentUserName(): string {
+		return this.getSettings().displayName;
+	}
+
+	private currentUserColor(): string {
+		return pickUserColor(this.currentUserName());
+	}
 
 	/**
 	 * A mirrored foreign note is governed by its own vault's permissions, which were resolved when
@@ -355,8 +368,8 @@ export class SyncManager {
 			documentId,
 			serverUrl: settings.serverUrl,
 			apiKey: settings.apiKey,
-			userName: this.userName,
-			userColor: this.userColor,
+			userName: this.currentUserName(),
+			userColor: this.currentUserColor(),
 			readOnly: !writable,
 			onError: (error) => console.error("[StoneSync]", error),
 			onStatusChange: (status) => {
@@ -443,21 +456,33 @@ export class SyncManager {
 	 * Tombstones the document server-side, so other devices actually learn about the
 	 * deletion (previously this only tore down the local session/cache, never told the
 	 * server at all - the file kept existing for everyone else indefinitely).
+	 *
+	 * Id lookup goes through {@link resolveDeleteDocumentId} (see its doc comment for the real
+	 * bug it closes: deleting a file that was never opened/edited locally - e.g. one that
+	 * arrived via a bulk vault download - used to silently never reach the server at all).
 	 */
 	async handleDelete(path: string): Promise<void> {
 		const settings = this.getSettings();
-		const documentId = this.resolver?.peekId(path);
+		if (!isConfigured(settings)) {
+			this.unbind(path);
+			this.refreshActiveIndicators();
+			this.resolver?.forget(path);
+			return;
+		}
 
 		this.unbind(path);
 		this.refreshActiveIndicators();
-		this.resolver?.forget(path);
 
-		if (!documentId || !isConfigured(settings)) return;
 		try {
-			await deleteDocument(settings.serverUrl, settings.apiKey, documentId);
+			const documentId = await resolveDeleteDocumentId(this.resolver, path);
+			if (documentId) {
+				await deleteDocument(settings.serverUrl, settings.apiKey, documentId);
+			}
 		} catch (error) {
 			console.error("[StoneSync] Failed to notify server of local delete", path, error);
 			new Notice(`StoneSync: Failed to sync deletion of "${path}" - it may reappear.`);
+		} finally {
+			this.resolver?.forget(path);
 		}
 	}
 

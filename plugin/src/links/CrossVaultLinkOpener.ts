@@ -2,6 +2,7 @@ import { Notice, TFile, type App } from "obsidian";
 import { DocumentSession } from "../sync/DocumentSession";
 import { ensureParentFolders } from "../sync/ensureParentFolders";
 import type { StoneSyncSettings } from "../settings/StoneSyncSettings";
+import { pickUserColor } from "../settings/userColor";
 import type { CrossVaultLink } from "./crossVaultLinks";
 import { mirrorPathFor } from "./crossVaultLinks";
 import { LinkClient, type ResolvedLink } from "./LinkClient";
@@ -11,8 +12,6 @@ export interface CrossVaultLinkOpenerOptions {
 	app: App;
 	getSettings: () => StoneSyncSettings;
 	mirrors: MirrorRegistry;
-	userName: string;
-	userColor: string;
 	/** Called after a mirror was created, so live sync can pick the new note up. */
 	onMirrorCreated: () => Promise<void>;
 }
@@ -90,8 +89,8 @@ export class CrossVaultLinkOpener {
 			documentId,
 			serverUrl: settings.serverUrl,
 			apiKey: settings.apiKey,
-			userName: this.options.userName,
-			userColor: this.options.userColor,
+			userName: settings.displayName,
+			userColor: pickUserColor(settings.displayName),
 			readOnly: true,
 			onError: (error) => console.error("[StoneSync]", error),
 		});

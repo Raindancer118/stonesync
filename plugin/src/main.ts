@@ -20,25 +20,7 @@ import { CrossVaultLinkOpener } from "./links/CrossVaultLinkOpener";
 import { CrossVaultLinkRenderer } from "./links/CrossVaultLinkRenderer";
 import { findCrossVaultLinks, parseCrossVaultLink } from "./links/crossVaultLinks";
 import { exchangeCode } from "./onboarding/ApiKeyExchangeClient";
-
-const CURSOR_COLORS = [
-	"#e57373",
-	"#64b5f6",
-	"#81c784",
-	"#ffb74d",
-	"#ba68c8",
-	"#4db6ac",
-	"#f06292",
-	"#a1887f",
-];
-
-function pickUserColor(seed: string): string {
-	let hash = 0;
-	for (let i = 0; i < seed.length; i++) {
-		hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-	}
-	return CURSOR_COLORS[hash % CURSOR_COLORS.length];
-}
+import { pickUserColor } from "./settings/userColor";
 
 /** `app.setting` is Obsidian's internal settings-panel API - stable in practice, but not part of the public typings. */
 interface AppWithSettings {
@@ -85,20 +67,23 @@ export default class StoneSyncPlugin extends Plugin {
 			await this.saveData(this.settings);
 		}
 
-		const userName = this.settings.displayName;
+		// getSettings is a live accessor, not a captured value - SyncManager/VaultEventsManager/
+		// CrossVaultLinkOpener read the display name through it every time they need it, so a
+		// later change in Settings takes effect immediately instead of only after Obsidian is
+		// restarted (previously these three took userName/userColor as plain strings captured
+		// once here at onload() time, so a later name change never reached an already-running
+		// session).
 		this.mirrors = new MirrorRegistry(() => this.settings, () => this.saveData(this.settings));
-		this.syncManager = new SyncManager(this.app, () => this.settings, userName, pickUserColor(userName), this.mirrors);
+		this.syncManager = new SyncManager(this.app, () => this.settings, this.mirrors);
 		this.linkOpener = new CrossVaultLinkOpener({
 			app: this.app,
 			getSettings: () => this.settings,
 			mirrors: this.mirrors,
-			userName,
-			userColor: pickUserColor(userName),
 			onMirrorCreated: async () => {
 				await this.syncManager?.onActiveLeafChange();
 			},
 		});
-		this.vaultEventsManager = new VaultEventsManager(this.app, () => this.settings, userName, pickUserColor(userName),
+		this.vaultEventsManager = new VaultEventsManager(this.app, () => this.settings,
 			() => this.syncManager?.applyPermissionChange() ?? Promise.resolve(),
 			(documentId) => this.syncManager?.applyLinkRewriteEvent(documentId) ?? Promise.resolve());
 		this.vaultEventsManager.start();

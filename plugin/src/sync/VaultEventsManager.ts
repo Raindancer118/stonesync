@@ -5,6 +5,7 @@ import { getClientSessionId } from "../net/clientSession";
 import { downloadTextDocument, downloadAttachmentDocument } from "./DocumentDownloader";
 import { listDocuments } from "./DocumentListClient";
 import { toWebSocketBaseUrl, isConfigured, type StoneSyncSettings } from "../settings/StoneSyncSettings";
+import { pickUserColor } from "../settings/userColor";
 
 /** Caps how many downloads run at once - a burst of many document_created events (e.g. a
  * colleague dragging a whole folder in) must not fire off hundreds of concurrent requests/Yjs
@@ -35,13 +36,20 @@ export class VaultEventsManager {
 	constructor(
 		private readonly app: App,
 		private readonly getSettings: () => StoneSyncSettings,
-		private readonly userName: string,
-		private readonly userColor: string,
 		/** Re-reads permissions and rebinds open editors after the server reports a change. */
 		private readonly onAccessChanged: () => Promise<void> = async () => {},
 		/** Applies a queued cross-vault link repair to a note this client has open. */
 		private readonly onLinkRewrite: (documentId: string) => Promise<void> = async () => {}
 	) {}
+
+	/** Read live on every call - see {@code SyncManager.currentUserName} for why. */
+	private currentUserName(): string {
+		return this.getSettings().displayName;
+	}
+
+	private currentUserColor(): string {
+		return pickUserColor(this.currentUserName());
+	}
 
 	start(): void {
 		this.stop();
@@ -88,7 +96,7 @@ export class VaultEventsManager {
 			const documents = await listDocuments(settings.serverUrl, settings.apiKey, settings.vaultId);
 			for (const document of documents) {
 				this.enqueueTask(async () => {
-					const downloaderOptions = { app: this.app, settings, userName: this.userName, userColor: this.userColor };
+					const downloaderOptions = { app: this.app, settings, userName: this.currentUserName(), userColor: this.currentUserColor() };
 					if (document.contentType === "TEXT") {
 						await downloadTextDocument(downloaderOptions, document.id, document.path);
 					} else {
@@ -128,7 +136,7 @@ export class VaultEventsManager {
 
 	private async react(event: VaultEvent): Promise<void> {
 		const settings = this.getSettings();
-		const downloaderOptions = { app: this.app, settings, userName: this.userName, userColor: this.userColor };
+		const downloaderOptions = { app: this.app, settings, userName: this.currentUserName(), userColor: this.currentUserColor() };
 
 		if (event.type === "document_created") {
 			if (await this.app.vault.adapter.exists(event.path)) return;
