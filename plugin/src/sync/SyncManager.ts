@@ -242,6 +242,16 @@ export class SyncManager {
 
 		for (const { file, cm } of open) {
 			if (this.boundViews.get(file.path) === cm) continue; // already bound to this very editor
+			// Real bug found live: deleting a file that's currently open in an editor pane
+			// resurrected it right back. Obsidian's own "layout-change" event fires shortly after
+			// a delete, before the pane/leaf has necessarily been torn down - `openMarkdownEditors`
+			// can then still report a stale `TFile` for the just-deleted path. Binding it re-ran
+			// `bindEditor`'s history replay, which dispatches the document's last known content
+			// into the (still-showing, doomed) CM6 editor - and Obsidian persists that editor
+			// content back to disk, undoing the delete. `getAbstractFileByPath` re-checks the
+			// vault's actual index (source of truth), which drops a path immediately on delete
+			// even when a leaf's view object hasn't caught up yet.
+			if (!(this.app.vault.getAbstractFileByPath(file.path) instanceof TFile)) continue;
 			if (!this.accessFor(file.path).readable) {
 				// Not ours to see: no session, no socket, no cursor - the note simply is not
 				// synchronized for this user (the server would refuse anyway).
