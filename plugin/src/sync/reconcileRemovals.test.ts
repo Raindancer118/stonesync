@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pathsRemovedSincePreviousSnapshot } from "./reconcileRemovals";
+import { pathsRemovedSincePreviousSnapshot, isPlausibleRemovalCount } from "./reconcileRemovals";
 
 describe("pathsRemovedSincePreviousSnapshot", () => {
 	it("returns nothing when there is no prior snapshot - unsafe to infer a deletion", () => {
@@ -37,5 +37,32 @@ describe("pathsRemovedSincePreviousSnapshot", () => {
 		const removed = pathsRemovedSincePreviousSnapshot(["Notes/a.md"], ["Notes/a.md", "Notes/new.md"]);
 
 		expect(removed).toEqual([]);
+	});
+});
+
+describe("isPlausibleRemovalCount", () => {
+	it("trusts a small removal - a genuine handful of files deleted while offline", () => {
+		expect(isPlausibleRemovalCount(700, 10)).toBe(true);
+	});
+
+	it("trusts removing exactly half", () => {
+		expect(isPlausibleRemovalCount(100, 50)).toBe(true);
+	});
+
+	it("rejects removing more than half - the live-incident scenario (107 of ~700 removed was fine; " +
+		"far more than half vanishing at once is the red flag)", () => {
+		expect(isPlausibleRemovalCount(700, 351)).toBe(false);
+	});
+
+	it("rejects a total wipeout even when the previous snapshot was small", () => {
+		expect(isPlausibleRemovalCount(3, 3)).toBe(false);
+	});
+
+	it("trusts a zero-removal reconcile regardless of vault size", () => {
+		expect(isPlausibleRemovalCount(700, 0)).toBe(true);
+	});
+
+	it("trusts anything when there was no previous snapshot to lose confidence in (nothing known yet)", () => {
+		expect(isPlausibleRemovalCount(0, 0)).toBe(true);
 	});
 });

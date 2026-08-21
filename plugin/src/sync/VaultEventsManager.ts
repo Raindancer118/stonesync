@@ -6,13 +6,29 @@ import { downloadTextDocument, downloadAttachmentDocument } from "./DocumentDown
 import { listDocuments } from "./DocumentListClient";
 import { toWebSocketBaseUrl, isConfigured, type StoneSyncSettings } from "../settings/StoneSyncSettings";
 import { pickUserColor } from "../settings/userColor";
-import { pathsRemovedSincePreviousSnapshot } from "./reconcileRemovals";
+import { pathsRemovedSincePreviousSnapshot, isPlausibleRemovalCount } from "./reconcileRemovals";
+import { labelForEvent } from "./syncQueueLabels";
 
 /** Caps how many downloads run at once - a burst of many document_created events (e.g. a
  * colleague dragging a whole folder in) must not fire off hundreds of concurrent requests/Yjs
  * sessions at once (found via agy architecture review: a "thundering herd" would flood the
  * event loop and could overwhelm the server too). */
 const MAX_CONCURRENT_REACTIONS = 4;
+
+/** One human-readable in-flight or queued sync job - see {@link VaultEventsManager.setQueueListener}. */
+export interface SyncQueueItem {
+	label: string;
+}
+
+export interface SyncQueueSnapshot {
+	active: SyncQueueItem[];
+	pending: SyncQueueItem[];
+}
+
+interface QueuedTask {
+	label: string;
+	run: () => Promise<void>;
+}
 
 /**
  * Owns the single, persistent vault-events connection (see `VaultEventsSocket`) and reacts to
@@ -31,8 +47,9 @@ const MAX_CONCURRENT_REACTIONS = 4;
 export class VaultEventsManager {
 	private socket: VaultEventsSocket | null = null;
 	private shownUnauthorizedNotice = false;
-	private activeReactions = 0;
-	private readonly pendingReactions: Array<() => Promise<void>> = [];
+	private readonly activeTasks: QueuedTask[] = [];
+	private readonly pendingTasks: QueuedTask[] = [];
+	private queueListener: ((snapshot: SyncQueueSnapshot) => void) | null = null;
 
 	constructor(
 		private readonly app: App,
@@ -100,7 +117,27 @@ export class VaultEventsManager {
 	stop(): void {
 		this.socket?.destroy();
 		this.socket = null;
-		this.pendingReactions.length = 0;
+		this.pendingTasks.length = 0;
+		this.activeTasks.length = 0;
+		this.notifyQueueListener();
+	}
+
+	/** For a "what's StoneSync doing right now" UI (see `SyncQueueModal`) - called immediately
+	 * with the current state, then again on every change. */
+	setQueueListener(listener: ((snapshot: SyncQueueSnapshot) => void) | null): void {
+		this.queueListener = listener;
+		this.notifyQueueListener();
+	}
+
+	getQueueSnapshot(): SyncQueueSnapshot {
+		return {
+			active: this.activeTasks.map((task) => ({ label: task.label })),
+			pending: this.pendingTasks.map((task) => ({ label: task.label })),
+		};
+	}
+
+	private notifyQueueListener(): void {
+		this.queueListener?.(this.getQueueSnapshot());
 	}
 
 	/**
@@ -122,13 +159,36 @@ export class VaultEventsManager {
 		try {
 			const documents = await listDocuments(settings.serverUrl, settings.apiKey, settings.vaultId);
 			const currentPaths = documents.map((document) => document.path);
+			const previouslyKnown = settings.knownServerPaths;
+			const removed = pathsRemovedSincePreviousSnapshot(previouslyKnown, currentPaths);
 
-			for (const path of pathsRemovedSincePreviousSnapshot(settings.knownServerPaths, currentPaths)) {
-				this.enqueueTask(() => this.removeLocallyIfPresent(path, "was deleted while you were offline"));
+			// Circuit breaker - see isPlausibleRemovalCount's doc comment: a transiently
+			// incomplete server response must never cascade into mass-deleting real files. If
+			// this trips, skip BOTH the removal pass and updating the snapshot below - retrying
+			// with the last known-good snapshot on the next successful connect is what recovers,
+			// rather than a wrong short list poisoning every future comparison too.
+			if (!isPlausibleRemovalCount(previouslyKnown?.length ?? 0, removed.length)) {
+				console.error(
+					"[StoneSync] Reconciliation refused to remove", removed.length, "of",
+					previouslyKnown?.length, "previously known files - the server's document list " +
+					"looked implausibly short (a transient issue, not a real mass delete). Skipping " +
+					"this reconcile's removal pass entirely."
+				);
+				new Notice(
+					"StoneSync: Skipped a suspicious sync reconciliation that would have removed " +
+						"an implausibly large number of local files - please check your connection " +
+						"and try syncing again."
+				);
+			} else {
+				for (const path of removed) {
+					this.enqueueTask(`Removing "${path}" (deleted while offline)`,
+						() => this.removeLocallyIfPresent(path, "was deleted while you were offline"));
+				}
+				await this.persistKnownPaths(currentPaths);
 			}
 
 			for (const document of documents) {
-				this.enqueueTask(async () => {
+				this.enqueueTask(`Checking "${document.path}"`, async () => {
 					const downloaderOptions = { app: this.app, settings, userName: this.currentUserName(), userColor: this.currentUserColor() };
 					if (document.contentType === "TEXT") {
 						await downloadTextDocument(downloaderOptions, document.id, document.path);
@@ -137,8 +197,6 @@ export class VaultEventsManager {
 					}
 				});
 			}
-
-			await this.persistKnownPaths(currentPaths);
 		} catch (error) {
 			console.error("[StoneSync] Failed to reconcile vault state after (re)connect", error);
 		}
@@ -146,24 +204,28 @@ export class VaultEventsManager {
 
 	private enqueue(event: VaultEvent): void {
 		if (event.originSessionId === getClientSessionId()) return; // our own action, already handled locally
-		this.enqueueTask(() => this.react(event));
+		this.enqueueTask(labelForEvent(event), () => this.react(event));
 	}
 
 	/** Runs at most `MAX_CONCURRENT_REACTIONS` tasks at once, queuing the rest. */
-	private enqueueTask(task: () => Promise<void>): void {
-		this.pendingReactions.push(task);
+	private enqueueTask(label: string, run: () => Promise<void>): void {
+		this.pendingTasks.push({ label, run });
+		this.notifyQueueListener();
 		this.pump();
 	}
 
 	private pump(): void {
-		while (this.activeReactions < MAX_CONCURRENT_REACTIONS && this.pendingReactions.length > 0) {
-			const task = this.pendingReactions.shift();
+		while (this.activeTasks.length < MAX_CONCURRENT_REACTIONS && this.pendingTasks.length > 0) {
+			const task = this.pendingTasks.shift();
 			if (!task) break;
-			this.activeReactions++;
-			task()
+			this.activeTasks.push(task);
+			this.notifyQueueListener();
+			task.run()
 				.catch((error) => console.error("[StoneSync] Failed to process a queued vault-events reaction", error))
 				.finally(() => {
-					this.activeReactions--;
+					const index = this.activeTasks.indexOf(task);
+					if (index >= 0) this.activeTasks.splice(index, 1);
+					this.notifyQueueListener();
 					this.pump();
 				});
 		}
