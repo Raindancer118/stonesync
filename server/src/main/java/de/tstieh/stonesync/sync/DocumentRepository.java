@@ -15,26 +15,28 @@ public interface DocumentRepository extends JpaRepository<DocumentEntity, UUID> 
     Optional<DocumentEntity> findByVaultIdAndCurrentPath(UUID vaultId, String currentPath);
 
     /**
-     * Ranked, typo-tolerant search within one vault: exact/stemmed full-text search (migration
-     * V7's {@code search_vector}/GIN index, {@code websearch_to_tsquery} - used deliberately over
-     * {@code to_tsquery}, since it never throws on arbitrary free-text input like quotes or stray
-     * punctuation) OR'd together with pg_trgm fuzzy matching (migration V8) so a typo or a partial
-     * word - exactly what's typed so far in a live/tab-complete search box - still finds things.
+     * Ranked, typo-tolerant search within one vault: exact/stemmed full-text search over content
+     * (migration V7's {@code search_vector}/GIN index, {@code websearch_to_tsquery} - used
+     * deliberately over {@code to_tsquery}, since it never throws on arbitrary free-text input
+     * like quotes or stray punctuation) OR'd together with pg_trgm fuzzy matching (migration V8)
+     * against the note TITLE only ({@code current_path}) - so a garbled/mistyped note name (the
+     * concrete case this was built for: typing "Moatseting" finds "Monatsmeeting.md") still finds
+     * the note, without needing the exact stemmed words full-text search requires.
      *
-     * <p>Both fuzzy comparisons use {@code word_similarity()}, not plain {@code similarity()}: it
-     * finds the best-aligned substring within the target instead of scoring the whole target
-     * string, which matters even for {@code current_path} - a folder-qualified path like
-     * {@code "Notes/Monatsmeeting.md"} scores far better against a garbled {@code "Moatseting"}
-     * this way (~0.45) than comparing the whole path including the folder and extension (~0.27).</p>
+     * <p>{@code word_similarity()}, not plain {@code similarity()}: it finds the best-aligned
+     * substring within the target instead of scoring the whole target string, so a
+     * folder-qualified path like {@code "Notes/Monatsmeeting.md"} scores well (~0.45) against a
+     * garbled query even though the folder and extension are noise it has to see past.</p>
      *
-     * <p>The two fuzzy comparisons use different thresholds for a reason found via a live search
-     * against the real ~700-document production vault: {@code current_path} is short, so a 0.3
-     * threshold stays precise. {@code plain_text} can be an entire document, and at that scale
-     * {@code word_similarity} against a short, heavily-garbled query is noisy - dozens of unrelated
-     * documents can coincidentally clear a low bar purely because there is so much text to search
-     * an unlucky local alignment in, which crowded a genuine match out of the ranked result window
-     * entirely. 0.45 cuts that noise down to a manageable level while still catching real typos in
-     * body text; the sharper "wrong note title" case above is what the lower path threshold is for.</p>
+     * <p>Deliberately NOT extended to fuzzy-match {@code plain_text}: tried and reverted after a
+     * live search against the real ~700-document production vault showed it doesn't work at that
+     * scale. Trigram similarity has a discrete, coarsely-quantized range for a query this short (a
+     * handful of achievable ratios, not a smooth 0-1 scale), so completely unrelated documents'
+     * incidental local alignments regularly land on the exact same value as a genuine match's
+     * score - no threshold could be found that kept the real "Monatsmeeting" match while excluding
+     * ~20 unrelated documents (ordinary Obsidian help pages) that happened to tie it. Exact/
+     * stemmed full-text search already covers typo-free content search with no such noise problem;
+     * fuzzy matching is scoped to the title, where it's short and precise, and stays that way.</p>
      *
      * <p>Returns raw {@code Object[]} rows (id, current_path, content_type, snippet) rather than
      * an interface projection - deliberately, since the reliability of Spring Data's
@@ -55,13 +57,11 @@ public interface DocumentRepository extends JpaRepository<DocumentEntity, UUID> 
               AND (
                     d.search_vector @@ websearch_to_tsquery('english', :query)
                     OR word_similarity(:query, d.current_path) > 0.3
-                    OR word_similarity(:query, coalesce(d.plain_text, '')) > 0.45
                   )
             ORDER BY
               GREATEST(
                 ts_rank(d.search_vector, websearch_to_tsquery('english', :query)),
-                word_similarity(:query, d.current_path),
-                word_similarity(:query, coalesce(d.plain_text, ''))
+                word_similarity(:query, d.current_path)
               ) DESC
             LIMIT :limit
             """, nativeQuery = true)
