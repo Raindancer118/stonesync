@@ -96,6 +96,41 @@ public class VaultGitRepository {
     }
 
     /**
+     * Wipes the vault's entire git history repository from disk - only ever called as part of a
+     * force-deleting the vault itself (see {@code AdminService#deleteVault}), never for a single
+     * document. A no-op if the repo was never created (a vault that had no materialized content
+     * yet). Removes the in-process lock too, so a concurrent materialize racing this on the same
+     * vault fails loudly against a missing directory rather than silently recreating it underneath
+     * the delete.
+     */
+    public void deleteRepository(UUID vaultId) {
+        Lock lock = lockFor(vaultId);
+        lock.lock();
+        try {
+            Path repoDir = repoDir(vaultId);
+            if (!Files.exists(repoDir)) {
+                return;
+            }
+            try (var walk = Files.walk(repoDir)) {
+                walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try {
+                        Files.delete(path);
+                    } catch (IOException e) {
+                        throw new VaultGitException("Failed to delete " + path + " while removing vault " + vaultId + "'s git history", e);
+                    }
+                });
+            }
+            AppLog.info("Deleted vault {}'s entire git history repository", vaultId);
+        } catch (IOException e) {
+            AppLog.error("Failed to delete git history repository for vault {}: {}", vaultId, e.getMessage());
+            throw new VaultGitException("Failed to delete git history repository for vault " + vaultId, e);
+        } finally {
+            lock.unlock();
+            vaultLocks.remove(vaultId);
+        }
+    }
+
+    /**
      * Removes {@code relativePath} from the vault's repo and commits, if the file is currently
      * tracked (a no-op otherwise - materialize was never called for it, or it was already
      * removed). Called on a real user-initiated document delete (NOT during a restore's

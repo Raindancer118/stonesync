@@ -2,20 +2,36 @@
 set -eu
 . /usr/local/bin/admin-env.sh
 
-if [ "${1:-}" = "" ]; then
-	echo "Usage: ss-delete-vault <vaultId>" >&2
+force=false
+vault_id=""
+for arg in "$@"; do
+	case "$arg" in
+		--force) force=true ;;
+		*) vault_id="$arg" ;;
+	esac
+done
+
+if [ "$vault_id" = "" ]; then
+	echo "Usage: ss-delete-vault <vaultId> [--force]" >&2
+	echo "  --force: also hard-deletes vaults that still have (even soft-deleted) documents," >&2
+	echo "           erasing their content, sync history and git history for good." >&2
 	exit 1
 fi
 
-# Server rejects this (409) if the vault still has documents - run ss-docs "$1"
-# first to check. This is intentional: nothing here cascades away synced content.
-http_code=$(curl -s -o /tmp/ss-delete-vault.out -w "%{http_code}" -X DELETE "$ADMIN_BASE/vaults/$1" -H "$ADMIN_AUTH")
+if [ "$force" = "true" ]; then
+	http_code=$(curl -s -o /tmp/ss-delete-vault.out -w "%{http_code}" -X DELETE "$ADMIN_BASE/vaults/$vault_id?force=true" -H "$ADMIN_AUTH")
+else
+	# Server rejects this (409) if the vault still has documents - run ss-docs "$1"
+	# first to check, or re-run with --force. This is intentional: nothing here cascades
+	# away synced content unless explicitly told to.
+	http_code=$(curl -s -o /tmp/ss-delete-vault.out -w "%{http_code}" -X DELETE "$ADMIN_BASE/vaults/$vault_id" -H "$ADMIN_AUTH")
+fi
 if [ "$http_code" = "409" ]; then
-	echo "Refused: this vault still has documents. Run 'ss-docs $1' to see them." >&2
+	echo "Refused: this vault still has documents. Run 'ss-docs $vault_id' to see them, or re-run with --force." >&2
 	exit 1
 elif [ "$http_code" -ge 300 ]; then
 	echo "Failed (HTTP $http_code):" >&2
 	cat /tmp/ss-delete-vault.out >&2
 	exit 1
 fi
-echo "vault $1 deleted."
+echo "vault $vault_id deleted."

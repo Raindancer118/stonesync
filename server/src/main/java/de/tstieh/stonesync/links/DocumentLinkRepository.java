@@ -15,4 +15,6 @@ public interface DocumentLinkRepository extends JpaRepository<DocumentLinkEntity
     List<DocumentLinkEntity> findByTargetDocumentId(UUID targetDocumentId);
 
     void deleteBySourceDocumentId(UUID sourceDocumentId);
+
+    void deleteBySourceDocumentIdIn(List<UUID> sourceDocumentIds);
 }

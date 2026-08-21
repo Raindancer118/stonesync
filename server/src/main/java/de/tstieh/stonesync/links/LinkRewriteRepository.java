@@ -8,4 +8,6 @@ import java.util.UUID;
 public interface LinkRewriteRepository extends JpaRepository<LinkRewriteEntity, Long> {
 
     List<LinkRewriteEntity> findByDocumentIdAndAppliedAtIsNullOrderByIdAsc(UUID documentId);
+
+    void deleteByDocumentIdIn(List<UUID> documentIds);
 }

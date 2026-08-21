@@ -5,8 +5,16 @@ import de.tstieh.stonesync.audit.AuditService;
 import de.tstieh.stonesync.auth.ApiKeyEntity;
 import de.tstieh.stonesync.auth.ApiKeyHasher;
 import de.tstieh.stonesync.auth.ApiKeyRepository;
+import de.tstieh.stonesync.attachments.AttachmentRepository;
+import de.tstieh.stonesync.history.VaultGitRepository;
+import de.tstieh.stonesync.links.DocumentLinkRepository;
+import de.tstieh.stonesync.links.LinkRewriteRepository;
 import de.tstieh.stonesync.logging.AppLog;
+import de.tstieh.stonesync.sync.DocumentEntity;
 import de.tstieh.stonesync.sync.DocumentRepository;
+import de.tstieh.stonesync.sync.DocumentRestoreQueueRepository;
+import de.tstieh.stonesync.sync.YjsSnapshotRepository;
+import de.tstieh.stonesync.sync.YjsUpdateRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,11 +43,22 @@ public class AdminService {
     private final ApiKeyHasher apiKeyHasher;
     private final AuditService auditService;
     private final Clock clock;
+    private final YjsUpdateRepository yjsUpdateRepository;
+    private final YjsSnapshotRepository yjsSnapshotRepository;
+    private final AttachmentRepository attachmentRepository;
+    private final DocumentRestoreQueueRepository restoreQueueRepository;
+    private final DocumentLinkRepository documentLinkRepository;
+    private final LinkRewriteRepository linkRewriteRepository;
+    private final VaultGitRepository gitRepository;
 
     public AdminService(UserRepository userRepository, VaultRepository vaultRepository,
                          UserVaultAccessRepository accessRepository, ApiKeyRepository apiKeyRepository,
                          DocumentRepository documentRepository, ApiKeyHasher apiKeyHasher,
-                         AuditService auditService, Clock clock) {
+                         AuditService auditService, Clock clock, YjsUpdateRepository yjsUpdateRepository,
+                         YjsSnapshotRepository yjsSnapshotRepository, AttachmentRepository attachmentRepository,
+                         DocumentRestoreQueueRepository restoreQueueRepository,
+                         DocumentLinkRepository documentLinkRepository, LinkRewriteRepository linkRewriteRepository,
+                         VaultGitRepository gitRepository) {
         this.userRepository = userRepository;
         this.vaultRepository = vaultRepository;
         this.accessRepository = accessRepository;
@@ -48,6 +67,13 @@ public class AdminService {
         this.apiKeyHasher = apiKeyHasher;
         this.auditService = auditService;
         this.clock = clock;
+        this.yjsUpdateRepository = yjsUpdateRepository;
+        this.yjsSnapshotRepository = yjsSnapshotRepository;
+        this.attachmentRepository = attachmentRepository;
+        this.restoreQueueRepository = restoreQueueRepository;
+        this.documentLinkRepository = documentLinkRepository;
+        this.linkRewriteRepository = linkRewriteRepository;
+        this.gitRepository = gitRepository;
     }
 
     @Transactional
@@ -171,10 +197,48 @@ public class AdminService {
      */
     @Transactional
     public void deleteVault(UUID vaultId) {
-        if (!documentRepository.findByVaultId(vaultId).isEmpty()) {
+        deleteVault(vaultId, false);
+    }
+
+    /**
+     * @param force When {@code false} (the default, see {@link #deleteVault(UUID)}), refuses to
+     *              delete a vault that still has document rows at all - including already
+     *              soft-deleted ones, since {@code documentRepository.findByVaultId} is not
+     *              filtered by {@code deleted_at}. When {@code true}, hard-deletes every document
+     *              row (and everything referencing them: Yjs updates/snapshots, attachments,
+     *              pending restores, cross-vault links, link rewrites) plus the vault's entire git
+     *              history repository, then the vault itself. Explicit product decision: an
+     *              operator who reaches for {@code --force} has already decided the content
+     *              doesn't matter (e.g. a soft-deleted-everything test vault) - this is not
+     *              guarded further.
+     *
+     *              <p>Deliberately does NOT delete the underlying attachment blob files on disk:
+     *              they are content-addressed (SHA-256) and deduplicated *across all vaults*, so a
+     *              blob this vault's attachment rows point at may still be referenced by a
+     *              completely different vault. Leaving orphaned blobs behind is a cheap, safe
+     *              cost; deleting one still in use elsewhere would not be.</p>
+     */
+    @Transactional
+    public void deleteVault(UUID vaultId, boolean force) {
+        List<DocumentEntity> documents = documentRepository.findByVaultId(vaultId);
+        if (!documents.isEmpty() && !force) {
             AppLog.warn("Refused to delete vault {} - it still has documents", vaultId);
             throw new VaultNotEmptyException("Vault " + vaultId + " still has documents - delete those first");
         }
+
+        if (!documents.isEmpty()) {
+            List<UUID> documentIds = documents.stream().map(DocumentEntity::getId).toList();
+            linkRewriteRepository.deleteByDocumentIdIn(documentIds);
+            documentLinkRepository.deleteBySourceDocumentIdIn(documentIds);
+            restoreQueueRepository.deleteAllByIdInBatch(documentIds);
+            yjsUpdateRepository.deleteByDocumentIdIn(documentIds);
+            attachmentRepository.deleteAllByIdInBatch(documentIds);
+            yjsSnapshotRepository.deleteAllByIdInBatch(documentIds);
+            documentRepository.deleteAllByIdInBatch(documentIds);
+            gitRepository.deleteRepository(vaultId);
+            AppLog.warn("Force-deleted vault {} - hard-removed {} document row(s) and its git history", vaultId, documentIds.size());
+        }
+
         accessRepository.deleteAll(accessRepository.findByVaultId(vaultId));
         vaultRepository.deleteById(vaultId);
         AppLog.info("Deleted vault {}", vaultId);
