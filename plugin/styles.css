@@ -106,7 +106,16 @@
  * right the moment the user is offline is worse than one that uses a good system serif/mono
  * fallback stack - `Design.md`'s Fraunces/IBM Plex Mono are a web-only detail, not reproduced here.
  */
-.stonesync-home-view {
+/*
+ * Matched on both the class (normal case) and the leaf's own `data-type` attribute Obsidian
+ * always sets to the view type - a defensive belt-and-braces pairing found necessary live: a
+ * class-only selector can lose a specificity tie against a user's theme/CSS snippets depending on
+ * load order, which showed up as an entirely blank black pane (Obsidian's unstyled default, not
+ * this stylesheet) rather than a partially-broken one. `!important` on background/color only,
+ * since this is a full-bleed branded surface that must never inherit the ambient theme.
+ */
+.stonesync-home-view,
+.workspace-leaf-content[data-type="stonesync-home"] {
 	--ss-bg: #17151b;
 	--ss-surface: #1f1c24;
 	--ss-surface-raised: #272330;
@@ -116,8 +125,8 @@
 	--ss-accent: #9b7fc4;
 	--ss-accent-strong: #b699dd;
 	--ss-warm: #c98a4b;
-	background: var(--ss-bg);
-	color: var(--ss-text);
+	background: var(--ss-bg) !important;
+	color: var(--ss-text) !important;
 	height: 100%;
 	overflow-y: auto;
 	padding: 3rem 2rem;
@@ -231,6 +240,13 @@
 	color: var(--ss-text-muted);
 	font-size: 0.88rem;
 	margin-top: 0.35rem;
+}
+
+.stonesync-home-error {
+	color: var(--ss-text-muted);
+	text-align: center;
+	max-width: 32rem;
+	margin: 3rem auto;
 }
 
 .stonesync-home-hit-snippet mark {

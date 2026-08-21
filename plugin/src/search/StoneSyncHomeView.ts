@@ -47,31 +47,42 @@ export class StoneSyncHomeView extends ItemView {
 		const content = this.contentEl;
 		content.empty();
 
-		const hero = content.createDiv({ cls: "stonesync-home-hero" });
-		const wordmark = hero.createDiv({ cls: "stonesync-home-wordmark" });
-		wordmark.createSpan({ text: "Stone", cls: "stonesync-home-wordmark-accent" });
-		wordmark.createSpan({ text: "Sync" });
+		// Built defensively: a thrown error here used to leave a silent, unstyled blank pane with
+		// no indication anything went wrong - now it renders a visible, readable message instead.
+		try {
+			const hero = content.createDiv({ cls: "stonesync-home-hero" });
+			const wordmark = hero.createDiv({ cls: "stonesync-home-wordmark" });
+			wordmark.createSpan({ text: "Stone", cls: "stonesync-home-wordmark-accent" });
+			wordmark.createSpan({ text: "Sync" });
 
-		const form = hero.createEl("form");
-		form.addEventListener("submit", (evt) => evt.preventDefault());
-		this.inputEl = form.createEl("input", {
-			type: "text",
-			placeholder: "Search notes, PDFs, screenshots…",
-			cls: "stonesync-home-input",
-		});
-		const button = form.createEl("button", { type: "submit", cls: "stonesync-home-search-btn", text: "⌕" });
-		button.setAttr("aria-label", "Search");
+			const form = hero.createEl("form");
+			form.addEventListener("submit", (evt) => evt.preventDefault());
+			this.inputEl = form.createEl("input", {
+				type: "text",
+				placeholder: "Search notes, PDFs, screenshots…",
+				cls: "stonesync-home-input",
+			});
+			const button = form.createEl("button", { type: "submit", cls: "stonesync-home-search-btn", text: "⌕" });
+			button.setAttr("aria-label", "Search");
 
-		hero.createDiv({
-			cls: "stonesync-home-hint",
-			text: "Searches every note and attachment in this vault, OCR included - typos are okay.",
-		});
+			hero.createDiv({
+				cls: "stonesync-home-hint",
+				text: "Searches every note and attachment in this vault, OCR included - typos are okay.",
+			});
 
-		this.resultsEl = content.createDiv({ cls: "stonesync-home-results" });
+			this.resultsEl = content.createDiv({ cls: "stonesync-home-results" });
 
-		this.inputEl.addEventListener("input", () => void this.runSearch(this.inputEl.value));
-		this.inputEl.addEventListener("keydown", (evt) => this.onKeyDown(evt));
-		window.setTimeout(() => this.inputEl.focus(), 0);
+			this.inputEl.addEventListener("input", () => void this.runSearch(this.inputEl.value));
+			this.inputEl.addEventListener("keydown", (evt) => this.onKeyDown(evt));
+			window.setTimeout(() => this.inputEl.focus(), 0);
+		} catch (error) {
+			console.error("[StoneSync] Failed to render the home view", error);
+			content.empty();
+			content.createDiv({
+				cls: "stonesync-home-error",
+				text: `StoneSync couldn't render the home view: ${error instanceof Error ? error.message : String(error)}`,
+			});
+		}
 	}
 
 	async onClose(): Promise<void> {
