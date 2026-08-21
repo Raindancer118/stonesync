@@ -19,13 +19,22 @@ public interface DocumentRepository extends JpaRepository<DocumentEntity, UUID> 
      * V7's {@code search_vector}/GIN index, {@code websearch_to_tsquery} - used deliberately over
      * {@code to_tsquery}, since it never throws on arbitrary free-text input like quotes or stray
      * punctuation) OR'd together with pg_trgm fuzzy matching (migration V8) so a typo or a partial
-     * word - exactly what's typed so far in a live/tab-complete search box - still finds things:
-     * {@code similarity()} against the note title ({@code current_path}, short enough that
-     * whole-string similarity is meaningful) and {@code word_similarity()} against the note/
-     * attachment plaintext ({@code word_similarity} rather than plain {@code similarity}, because
-     * the query is short and {@code plain_text} can be a whole document - plain {@code similarity}
-     * would dilute a real match to near-zero by comparing against the *entire* text's trigram set
-     * instead of just the best-matching substring within it).
+     * word - exactly what's typed so far in a live/tab-complete search box - still finds things.
+     *
+     * <p>Both fuzzy comparisons use {@code word_similarity()}, not plain {@code similarity()}: it
+     * finds the best-aligned substring within the target instead of scoring the whole target
+     * string, which matters even for {@code current_path} - a folder-qualified path like
+     * {@code "Notes/Monatsmeeting.md"} scores far better against a garbled {@code "Moatseting"}
+     * this way (~0.45) than comparing the whole path including the folder and extension (~0.27).</p>
+     *
+     * <p>The two fuzzy comparisons use different thresholds for a reason found via a live search
+     * against the real ~700-document production vault: {@code current_path} is short, so a 0.3
+     * threshold stays precise. {@code plain_text} can be an entire document, and at that scale
+     * {@code word_similarity} against a short, heavily-garbled query is noisy - dozens of unrelated
+     * documents can coincidentally clear a low bar purely because there is so much text to search
+     * an unlucky local alignment in, which crowded a genuine match out of the ranked result window
+     * entirely. 0.45 cuts that noise down to a manageable level while still catching real typos in
+     * body text; the sharper "wrong note title" case above is what the lower path threshold is for.</p>
      *
      * <p>Returns raw {@code Object[]} rows (id, current_path, content_type, snippet) rather than
      * an interface projection - deliberately, since the reliability of Spring Data's
@@ -45,13 +54,13 @@ public interface DocumentRepository extends JpaRepository<DocumentEntity, UUID> 
               AND d.deleted_at IS NULL
               AND (
                     d.search_vector @@ websearch_to_tsquery('english', :query)
-                    OR similarity(d.current_path, :query) > 0.3
-                    OR word_similarity(:query, coalesce(d.plain_text, '')) > 0.3
+                    OR word_similarity(:query, d.current_path) > 0.3
+                    OR word_similarity(:query, coalesce(d.plain_text, '')) > 0.45
                   )
             ORDER BY
               GREATEST(
                 ts_rank(d.search_vector, websearch_to_tsquery('english', :query)),
-                similarity(d.current_path, :query),
+                word_similarity(:query, d.current_path),
                 word_similarity(:query, coalesce(d.plain_text, ''))
               ) DESC
             LIMIT :limit
