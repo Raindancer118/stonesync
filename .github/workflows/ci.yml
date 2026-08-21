@@ -16,6 +16,12 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+      # OcrServiceTest/PdfTextExtractionServiceTest exercise the real `tesseract` binary (see
+      # server/src/main/java/de/tstieh/stonesync/search/OcrService.java) - same package the
+      # Dockerfile installs. Without it these fail with empty extraction results, not an error,
+      # since OcrService is deliberately best-effort/never-throws.
+      - name: Install tesseract
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng
       - name: Test
         working-directory: server
         run: mvn -B test
